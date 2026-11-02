@@ -37,10 +37,28 @@ localStorage.setItem = function(key, value) {
 FB_KEYS.forEach(key => {
     window.db.collection('sync').doc(key).onSnapshot(doc => {
         if (doc.exists) {
-            const cloudData = JSON.stringify(doc.data().data);
-            if (localStorage.getItem(key) !== cloudData) {
-                originalSetItem.call(localStorage, key, cloudData);
-                location.reload();
+            const cloudData = doc.data().data;
+            const cloudDataStr = JSON.stringify(cloudData);
+            if (localStorage.getItem(key) !== cloudDataStr) {
+                originalSetItem.call(localStorage, key, cloudDataStr);
+                // Aggiorna variabili globali senza reload
+                if (key === 'team_dipendenti_db') window.dipendenti = cloudData;
+                if (key === 'team_festivita_db') window.festivitaCustom = cloudData;
+                if (key === 'team_attivita_db') window.attivitaCalendario = cloudData;
+                if (key === 'team_consuntivazione_db') window.consuntivazioneData = cloudData;
+                if (key === 'team_schema_nominativi_db') {
+                    window.schemaNominativiRaw = cloudData;
+                    if (cloudData && !cloudData['EEMM2'] && cloudData.tecnici) {
+                        window.schemaNominativi = {'EEMM2': {tecnici: cloudData.tecnici || [], operativi: cloudData.operativi || []}};
+                    } else if (cloudData) {
+                        window.schemaNominativi = cloudData;
+                    }
+                }
+                // Aggiorna UI
+                if (window.dipendenti && typeof renderDipendenti === 'function') renderDipendenti();
+                if (window.festivitaCustom && typeof renderFestivita === 'function') renderFestivita();
+                if (typeof aggiornaCalendario === 'function') aggiornaCalendario();
+                if (typeof aggiornaSchemaNominativi === 'function') aggiornaSchemaNominativi();
             }
         }
     });
@@ -62,7 +80,18 @@ window.doLogin = function() {
             errEl.style.display = 'block';
         });
 };
-window.doLogout = function() { window.auth.signOut().then(() => location.reload()); };
+window.auth.onAuthStateChanged(user => {
+    if (user) {
+        document.getElementById('loginOverlay').style.display = 'none';
+        document.getElementById('appContainer').style.display = 'block';
+        document.getElementById('userInfo').textContent = user.email;
+        if(window.startApp) window.startApp();
+    } else {
+        document.getElementById('loginOverlay').style.display = 'flex';
+        document.getElementById('appContainer').style.display = 'none';
+        document.getElementById('userInfo').textContent = '';
+    }
+});
 window.auth.onAuthStateChanged(user => {
     if (user) {
         document.getElementById('loginOverlay').style.display = 'none';

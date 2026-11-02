@@ -491,8 +491,23 @@ window.startApp = function() {
     window.attivitaCalendario = JSON.parse(localStorage.getItem('team_attivita_db')) || [];
     window.consuntivazioneData = JSON.parse(localStorage.getItem('team_consuntivazione_db')) || [];
     window.schemaNominativiRaw = JSON.parse(localStorage.getItem('team_schema_nominativi_db')) || null;
+    
+    // ✅ CORREZIONE: aggiunte le chiamate mancanti
     if (typeof renderDipendenti === 'function') renderDipendenti();
     if (typeof popolaAnniIniziali === 'function') popolaAnniIniziali();
+    if (typeof popolaSelettoreAnniSchema === 'function') popolaSelettoreAnniSchema();
+    if (typeof popolaFiltroMSP === 'function') popolaFiltroMSP();
+    if (typeof popolaFiltroMSPSchemaNominativi === 'function') popolaFiltroMSPSchemaNominativi();
+    if (typeof popolaFiltriReport === 'function') popolaFiltriReport();
+    if (typeof popolaFiltriConsuntivazione === 'function') popolaFiltriConsuntivazione();
+    if (typeof renderFestivita === 'function') renderFestivita();
+    if (typeof aggiornaSchemaNominativi === 'function') aggiornaSchemaNominativi();
+    if (typeof aggiornaIndicatoreSpazio === 'function') aggiornaIndicatoreSpazio();
+    if (typeof aggiornaDatalistAutocompletamento === 'function') aggiornaDatalistAutocompletamento();
+    
+    // ✅ CORREZIONE: genera la tabella reperibilità con anno 2026
+    if (typeof generaTabellaReperibilita === 'function') generaTabellaReperibilita(2026);
+    
     if (typeof cambiaTab === 'function') cambiaTab('calendario');
 };
 

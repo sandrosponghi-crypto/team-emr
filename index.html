@@ -29,21 +29,50 @@ const FB_KEYS = ['team_dipendenti_db','team_festivita_db','team_attivita_db','te
 const originalSetItem = localStorage.setItem;
 
 localStorage.setItem = function(key, value) {
+    window._isWriting = true;  // Disabilita listener durante scrittura
     originalSetItem.call(localStorage, key, value);
     if (FB_KEYS.includes(key)) {
         try {
-            window.db.collection('sync').doc(key).set({ data: JSON.parse(value), ts: Date.now() }, { merge: true }).catch(e => {});
+            window.db.collection('sync').doc(key).set({ data: JSON.parse(value) }, { merge: true }).catch(e => {});
         } catch(e) {}
     }
+    setTimeout(() => { window._isWriting = false; }, 500);  // Riabilita dopo 500ms
 };
+
+// Flag per evitare loop durante scritture locali
+window._isWriting = false;
 
 FB_KEYS.forEach(key => {
     window.db.collection('sync').doc(key).onSnapshot(doc => {
-        if (doc.exists) {
-            const cloudData = JSON.stringify(doc.data().data);
-            if (localStorage.getItem(key) !== cloudData) {
-                originalSetItem.call(localStorage, key, cloudData);
-                location.reload();
+        if (doc.exists && !window._isWriting) {
+            const cloudData = doc.data().data;
+            const cloudDataStr = JSON.stringify(cloudData);
+            const localDataStr = localStorage.getItem(key);
+            
+            // Confronto intelligente: parse e compara (ignora ordine chiavi)
+            let isDifferent = false;
+            try {
+                const localData = localDataStr ? JSON.parse(localDataStr) : null;
+                isDifferent = JSON.stringify(localData) !== JSON.stringify(cloudData);
+            } catch(e) {
+                isDifferent = localDataStr !== cloudDataStr;
+            }
+            
+            if (isDifferent) {
+                originalSetItem.call(localStorage, key, cloudDataStr);
+                // Aggiorna variabili globali senza reload
+                if (key === 'team_dipendenti_db') window.dipendenti = cloudData;
+                if (key === 'team_festivita_db') window.festivitaCustom = cloudData;
+                if (key === 'team_attivita_db') window.attivitaCalendario = cloudData;
+                if (key === 'team_consuntivazione_db') window.consuntivazioneData = cloudData;
+                if (key === 'team_schema_nominativi_db') {
+                    window.schemaNominativiRaw = cloudData;
+                }
+                // Aggiorna UI
+                if (typeof renderDipendenti === 'function') renderDipendenti();
+                if (typeof renderFestivita === 'function') renderFestivita();
+                if (typeof aggiornaCalendario === 'function') aggiornaCalendario();
+                if (typeof aggiornaSchemaNominativi === 'function') aggiornaSchemaNominativi();
             }
         }
     });
@@ -66,7 +95,16 @@ window.doLogin = function() {
         });
 };
 
-window.doLogout = function() { window.auth.signOut().then(() => location.reload()); };
+window.doLogout = function() { 
+    window.auth.signOut().then(() => {
+        // Nascondi app, mostra login senza reload
+        document.getElementById('loginOverlay').style.display = 'flex';
+        document.getElementById('appContainer').style.display = 'none';
+        document.getElementById('userInfo').textContent = '';
+    }).catch(err => {
+        alert("Errore durante il logout: " + err.message);
+    });
+};
 
 window.auth.onAuthStateChanged(user => {
     if (user) {

@@ -8,7 +8,6 @@
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
-<!-- ✅ FIREBASE SDK -->
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
@@ -28,37 +27,23 @@ window.auth = firebase.auth();
 
 const FB_KEYS = ['team_dipendenti_db','team_festivita_db','team_attivita_db','team_consuntivazione_db','team_schema_nominativi_db','team_matrice_reperibilita_db'];
 const originalSetItem = localStorage.setItem;
+
 localStorage.setItem = function(key, value) {
     originalSetItem.call(localStorage, key, value);
     if (FB_KEYS.includes(key)) {
-        try { window.db.collection('sync').doc(key).set({ data: JSON.parse(value), ts: Date.now() }, { merge: true }).catch(e => {}); } catch(e) {}
+        try {
+            window.db.collection('sync').doc(key).set({ data: JSON.parse(value), ts: Date.now() }, { merge: true }).catch(e => {});
+        } catch(e) {}
     }
 };
+
 FB_KEYS.forEach(key => {
     window.db.collection('sync').doc(key).onSnapshot(doc => {
         if (doc.exists) {
-            const cloudData = doc.data().data;
-            const cloudDataStr = JSON.stringify(cloudData);
-            if (localStorage.getItem(key) !== cloudDataStr) {
-                originalSetItem.call(localStorage, key, cloudDataStr);
-                // Aggiorna variabili globali senza reload
-                if (key === 'team_dipendenti_db') window.dipendenti = cloudData;
-                if (key === 'team_festivita_db') window.festivitaCustom = cloudData;
-                if (key === 'team_attivita_db') window.attivitaCalendario = cloudData;
-                if (key === 'team_consuntivazione_db') window.consuntivazioneData = cloudData;
-                if (key === 'team_schema_nominativi_db') {
-                    window.schemaNominativiRaw = cloudData;
-                    if (cloudData && !cloudData['EEMM2'] && cloudData.tecnici) {
-                        window.schemaNominativi = {'EEMM2': {tecnici: cloudData.tecnici || [], operativi: cloudData.operativi || []}};
-                    } else if (cloudData) {
-                        window.schemaNominativi = cloudData;
-                    }
-                }
-                // Aggiorna UI
-                if (window.dipendenti && typeof renderDipendenti === 'function') renderDipendenti();
-                if (window.festivitaCustom && typeof renderFestivita === 'function') renderFestivita();
-                if (typeof aggiornaCalendario === 'function') aggiornaCalendario();
-                if (typeof aggiornaSchemaNominativi === 'function') aggiornaSchemaNominativi();
+            const cloudData = JSON.stringify(doc.data().data);
+            if (localStorage.getItem(key) !== cloudData) {
+                originalSetItem.call(localStorage, key, cloudData);
+                location.reload();
             }
         }
     });
@@ -80,6 +65,9 @@ window.doLogin = function() {
             errEl.style.display = 'block';
         });
 };
+
+window.doLogout = function() { window.auth.signOut().then(() => location.reload()); };
+
 window.auth.onAuthStateChanged(user => {
     if (user) {
         document.getElementById('loginOverlay').style.display = 'none';
@@ -90,17 +78,6 @@ window.auth.onAuthStateChanged(user => {
         document.getElementById('loginOverlay').style.display = 'flex';
         document.getElementById('appContainer').style.display = 'none';
         document.getElementById('userInfo').textContent = '';
-    }
-});
-window.auth.onAuthStateChanged(user => {
-    if (user) {
-        document.getElementById('loginOverlay').style.display = 'none';
-        document.getElementById('appContainer').style.display = 'block';
-        document.getElementById('userInfo').textContent = user.email;
-        if(window.startApp) window.startApp();
-    } else {
-        document.getElementById('loginOverlay').style.display = 'flex';
-        document.getElementById('appContainer').style.display = 'none';
     }
 });
 </script>
@@ -192,7 +169,6 @@ window.auth.onAuthStateChanged(user => {
 .panoramica-giorno{text-align:center;padding:1px;font-size:11px;font-weight:600;cursor:pointer;transition:background 0.15s;border-right:1px dotted #f1f5f9;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center}
 .panoramica-giorno:hover{background:#dbeafe}
 .panoramica-giorno.oggi{background:#dc2626!important;color:white!important;font-weight:800}
-.panoramica-giorno.oggi:hover{background:#b91c1c!important}
 .panoramica-giorno.oggi-fuori-mese{color:#dc2626!important;font-weight:800;cursor:pointer}
 .panoramica-giorno.weekend{color:#ea580c;font-weight:700;background:#fef9c3}
 .panoramica-giorno.festivo{background:#fecaca;color:#991b1b;font-weight:700}
@@ -209,7 +185,6 @@ window.auth.onAuthStateChanged(user => {
 </head>
 <body class="bg-slate-50 min-h-screen text-slate-800 font-sans pb-12">
 
-<!-- ✅ SCHERMATA DI LOGIN -->
 <div id="loginOverlay">
     <div class="login-box">
         <i class="fa-solid fa-users-gear text-amber-500 text-4xl mb-4"></i>
@@ -222,292 +197,282 @@ window.auth.onAuthStateChanged(user => {
     </div>
 </div>
 
-<!-- ✅ CONTENITORE APP -->
 <div id="appContainer" style="display:none;">
-    <header class="bg-slate-950 text-white shadow-lg sticky top-0 z-50 border-b border-slate-800">
-        <div class="max-w-7xl mx-auto px-4 py-3 flex flex-col md:flex-row justify-between items-center gap-3">
-            <div class="flex items-center gap-3">
-                <i class="fa-solid fa-users-gear text-amber-500 text-2xl"></i>
-                <div><h1 class="font-bold text-lg tracking-wide">Gestione Team EMR - by Sponghi</h1><p class="text-xs text-slate-400">Pianificazione, Reperibilità & Consuntivazione CAPEX</p></div>
-            </div>
-            <nav class="flex flex-wrap gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800 items-center">
-                <button type="button" onclick="cambiaTab('calendario')" id="tab-calendario" class="btn-tab text-[11px] font-bold px-3 py-1.5 rounded-md transition bg-blue-800 text-white shadow">Calendario</button>
-                <button type="button" onclick="cambiaTab('consuntivazione')" id="tab-consuntivazione" class="btn-tab text-[11px] font-bold px-3 py-1.5 rounded-md transition text-slate-300 hover:text-white hover:bg-slate-800">CAPEX</button>
-                <button type="button" onclick="cambiaTab('report')" id="tab-report" class="btn-tab text-[11px] font-bold px-3 py-1.5 rounded-md transition text-slate-300 hover:text-white hover:bg-slate-800">Report</button>
-                <button type="button" onclick="cambiaTab('schema-nominativi')" id="tab-schema-nominativi" class="btn-tab text-[11px] font-bold px-3 py-1.5 rounded-md transition text-slate-300 hover:text-white hover:bg-slate-800">Pers.REP</button>
-                <button type="button" onclick="cambiaTab('reperibilita')" id="tab-reperibilita" class="btn-tab text-[11px] font-bold px-3 py-1.5 rounded-md transition text-slate-300 hover:text-white hover:bg-slate-800">Reperib.</button>
-                <button type="button" onclick="cambiaTab('anagrafica')" id="tab-anagrafica" class="btn-tab text-[11px] font-bold px-3 py-1.5 rounded-md transition text-slate-300 hover:text-white hover:bg-slate-800">Anagrafica</button>
-                <button type="button" onclick="cambiaTab('festivita')" id="tab-festivita" class="btn-tab text-[11px] font-bold px-3 py-1.5 rounded-md transition text-slate-300 hover:text-white hover:bg-slate-800">Festività</button>
-                <div class="ml-2 pl-2 border-l border-slate-700 flex items-center gap-2">
-                    <span id="userInfo" class="text-[11px] text-slate-400"></span>
-                    <button onclick="window.doLogout()" class="text-[11px] font-bold px-2 py-1 rounded-md transition text-red-400 hover:text-red-300 hover:bg-slate-800" title="Esci"><i class="fa-solid fa-right-from-bracket"></i></button>
-                </div>
-            </nav>
-        </div>
-    </header>
+<header class="bg-slate-950 text-white shadow-lg sticky top-0 z-50 border-b border-slate-800">
+<div class="max-w-7xl mx-auto px-4 py-3 flex flex-col md:flex-row justify-between items-center gap-3">
+<div class="flex items-center gap-3">
+<i class="fa-solid fa-users-gear text-amber-500 text-2xl"></i>
+<div><h1 class="font-bold text-lg tracking-wide">Gestione Team EMR - by Sponghi</h1><p class="text-xs text-slate-400">Pianificazione, Reperibilità & Consuntivazione CAPEX</p></div>
+</div>
+<nav class="flex flex-wrap gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800 items-center">
+<button type="button" onclick="cambiaTab('calendario')" id="tab-calendario" class="btn-tab text-[11px] font-bold px-3 py-1.5 rounded-md transition bg-blue-800 text-white shadow">Calendario</button>
+<button type="button" onclick="cambiaTab('consuntivazione')" id="tab-consuntivazione" class="btn-tab text-[11px] font-bold px-3 py-1.5 rounded-md transition text-slate-300 hover:text-white hover:bg-slate-800">CAPEX</button>
+<button type="button" onclick="cambiaTab('report')" id="tab-report" class="btn-tab text-[11px] font-bold px-3 py-1.5 rounded-md transition text-slate-300 hover:text-white hover:bg-slate-800">Report</button>
+<button type="button" onclick="cambiaTab('schema-nominativi')" id="tab-schema-nominativi" class="btn-tab text-[11px] font-bold px-3 py-1.5 rounded-md transition text-slate-300 hover:text-white hover:bg-slate-800">Pers.REP</button>
+<button type="button" onclick="cambiaTab('reperibilita')" id="tab-reperibilita" class="btn-tab text-[11px] font-bold px-3 py-1.5 rounded-md transition text-slate-300 hover:text-white hover:bg-slate-800">Reperib.</button>
+<button type="button" onclick="cambiaTab('anagrafica')" id="tab-anagrafica" class="btn-tab text-[11px] font-bold px-3 py-1.5 rounded-md transition text-slate-300 hover:text-white hover:bg-slate-800">Anagrafica</button>
+<button type="button" onclick="cambiaTab('festivita')" id="tab-festivita" class="btn-tab text-[11px] font-bold px-3 py-1.5 rounded-md transition text-slate-300 hover:text-white hover:bg-slate-800">Festività</button>
+<div class="ml-2 pl-2 border-l border-slate-700 flex items-center gap-2">
+<span id="userInfo" class="text-[11px] text-slate-400"></span>
+<button onclick="window.doLogout()" class="text-[11px] font-bold px-2 py-1 rounded-md transition text-red-400 hover:text-red-300 hover:bg-slate-800" title="Esci"><i class="fa-solid fa-right-from-bracket"></i></button>
+</div>
+</nav>
+</div>
+</header>
 
-    <main class="max-w-[95vw] mx-auto px-4 mt-6 space-y-6">
+<main class="max-w-[95vw] mx-auto px-4 mt-6 space-y-6">
 
-        <!-- SCHEDA CALENDARIO -->
-        <section id="sezione-calendario" class="tab-contenuto space-y-6">
-            <div class="bg-white rounded-xl shadow-md p-5 border border-slate-200">
-                <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-5 border-b pb-4">
-                    <div class="flex items-center gap-3 flex-wrap">
-                        <div id="controlliNavigazione" class="flex items-center gap-1 bg-slate-800 text-white p-1 rounded-lg shadow-sm">
-                            <button type="button" onclick="spostaDataRiferimento(-7)" class="px-2 py-1 hover:bg-slate-700 rounded text-xs font-bold">-1w</button>
-                            <button type="button" onclick="spostaDataRiferimento(-1)" class="px-2 py-1 hover:bg-slate-700 rounded text-xs font-bold">-1d</button>
-                            <button type="button" onclick="ripristinaOggi()" class="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 rounded text-xs font-bold">Oggi</button>
-                            <button type="button" onclick="spostaDataRiferimento(1)" class="px-2 py-1 hover:bg-slate-700 rounded text-xs font-bold">+1d</button>
-                            <button type="button" onclick="spostaDataRiferimento(7)" class="px-2 py-1 hover:bg-slate-700 rounded text-xs font-bold">+1w</button>
-                        </div>
-                        <div class="flex items-center gap-1 flex-wrap">
-                            <div id="filtroAnnoGroup" class="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-300"><label class="text-xs font-bold text-slate-600 px-1">Anno:</label><select id="calAnno" onchange="aggiornaDataDaSelettori()" class="bg-white text-xs font-bold text-slate-800 rounded px-2 py-1 border border-slate-300"></select></div>
-                            <div id="filtroMeseGroup" class="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-300"><label class="text-xs font-bold text-slate-600 px-1">Mese:</label><select id="calMese" onchange="aggiornaDataDaSelettori()" class="bg-white text-xs font-bold text-slate-800 rounded px-2 py-1 border border-slate-300"><option value="0">Gennaio</option><option value="1">Febbraio</option><option value="2">Marzo</option><option value="3">Aprile</option><option value="4">Maggio</option><option value="5">Giugno</option><option value="6">Luglio</option><option value="7">Agosto</option><option value="8">Settembre</option><option value="9">Ottobre</option><option value="10">Novembre</option><option value="11">Dicembre</option></select></div>
-                            <div id="filtroMSPGroup" class="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-300"><label class="text-xs font-bold text-slate-600 px-1">MSP:</label><select id="filtroMSP" onchange="aggiornaCalendario()" class="bg-white text-xs font-bold text-slate-800 rounded px-2 py-1 border border-slate-300"><option value="TUTTI">Tutti</option></select></div>
-                            <div id="filtroCercaGroup" class="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-300"><label class="text-xs font-bold text-slate-600 px-1"><i class="fa-solid fa-magnifying-glass mr-1"></i>Cerca:</label><input type="text" id="filtroPersonale" oninput="aggiornaCalendario()" placeholder="Cognome, Nome o MSP..." class="bg-white text-xs font-semibold text-slate-800 rounded px-2 py-1 border border-slate-300 w-56 focus:outline-none focus:ring-2 focus:ring-blue-500"></div>
-                        </div>
-                        <!-- ✅ PULSANTI EXCEL RIPRISTINATI -->
-                        <div id="pulsantiExcelCalendario" class="flex flex-wrap gap-2 hidden">
-                            <button type="button" onclick="esportaDatabaseExcel()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition flex items-center gap-1"><i class="fa-solid fa-file-export"></i> Salva Database Excel</button>
-                            <label class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition cursor-pointer flex items-center gap-1"><i class="fa-solid fa-file-import"></i> Carica Database Excel<input type="file" id="inputImportDatabaseCal" accept=".xlsx" class="hidden" onchange="importaDatabaseExcel(event)"></label>
-                        </div>
-                    </div>
-                    <div class="flex items-center gap-2"><span class="text-xs font-bold text-slate-600">Vista:</span><div class="inline-flex rounded-md shadow-sm"><button type="button" id="btnVistaSettimana" onclick="setModalitaVista('settimana')" class="px-3 py-1.5 text-xs font-bold rounded-l-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">Settimanale</button><button type="button" id="btnVistaMese" onclick="setModalitaVista('mese')" class="px-3 py-1.5 text-xs font-bold border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">Mensile</button><button type="button" id="btnVistaAnnuale" onclick="setModalitaVista('annuale')" class="px-3 py-1.5 text-xs font-bold rounded-r-lg border border-slate-300 bg-blue-600 text-white">Annuale</button></div></div>
-                </div>
-                <div class="mb-3 text-xs font-semibold text-slate-600 flex flex-wrap gap-2 items-center justify-between bg-slate-50 px-3 py-2 rounded border border-slate-200">
-                    <span id="labelFinestraData">Finestra: ---</span>
-                    <div class="flex flex-wrap items-center gap-2 text-[11px]">
-                        <span class="px-2 py-0.5 rounded bg-sky-100 border border-sky-300 text-sky-950 font-bold">Attività Ordinarie</span>
-                        <span class="px-2 py-0.5 rounded bg-slate-600 text-white font-bold">FE/FA</span>
-                        <span class="px-2 py-0.5 rounded bg-violet-600 text-white font-bold">MA</span>
-                        <span class="px-2 py-0.5 rounded bg-teal-600 text-white font-bold">RC</span>
-                        <span class="px-2 py-0.5 rounded bg-emerald-600 text-white font-bold">RF</span>
-                        <span class="px-2 py-0.5 rounded bg-rose-600 text-white font-bold">Rep. H24</span>
-                        <span class="px-2 py-0.5 rounded bg-amber-600 text-white font-bold">Rep. Mod.</span>
-                        <span class="px-2 py-0.5 rounded bg-orange-200 border border-orange-400 text-rose-900 font-black">Straord. (>7h36m)</span>
-                    </div>
-                </div>
-                <div class="overflow-x-auto"><div id="contenitoreGrigliaCalendario" class="min-w-[1200px]"></div></div>
-            </div>
-        </section>
+<section id="sezione-calendario" class="tab-contenuto space-y-6">
+<div class="bg-white rounded-xl shadow-md p-5 border border-slate-200">
+<div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-5 border-b pb-4">
+<div class="flex items-center gap-3 flex-wrap">
+<div id="controlliNavigazione" class="flex items-center gap-1 bg-slate-800 text-white p-1 rounded-lg shadow-sm">
+<button type="button" onclick="spostaDataRiferimento(-7)" class="px-2 py-1 hover:bg-slate-700 rounded text-xs font-bold">-1w</button>
+<button type="button" onclick="spostaDataRiferimento(-1)" class="px-2 py-1 hover:bg-slate-700 rounded text-xs font-bold">-1d</button>
+<button type="button" onclick="ripristinaOggi()" class="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 rounded text-xs font-bold">Oggi</button>
+<button type="button" onclick="spostaDataRiferimento(1)" class="px-2 py-1 hover:bg-slate-700 rounded text-xs font-bold">+1d</button>
+<button type="button" onclick="spostaDataRiferimento(7)" class="px-2 py-1 hover:bg-slate-700 rounded text-xs font-bold">+1w</button>
+</div>
+<div class="flex items-center gap-1 flex-wrap">
+<div id="filtroAnnoGroup" class="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-300"><label class="text-xs font-bold text-slate-600 px-1">Anno:</label><select id="calAnno" onchange="aggiornaDataDaSelettori()" class="bg-white text-xs font-bold text-slate-800 rounded px-2 py-1 border border-slate-300"></select></div>
+<div id="filtroMeseGroup" class="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-300"><label class="text-xs font-bold text-slate-600 px-1">Mese:</label><select id="calMese" onchange="aggiornaDataDaSelettori()" class="bg-white text-xs font-bold text-slate-800 rounded px-2 py-1 border border-slate-300"><option value="0">Gennaio</option><option value="1">Febbraio</option><option value="2">Marzo</option><option value="3">Aprile</option><option value="4">Maggio</option><option value="5">Giugno</option><option value="6">Luglio</option><option value="7">Agosto</option><option value="8">Settembre</option><option value="9">Ottobre</option><option value="10">Novembre</option><option value="11">Dicembre</option></select></div>
+<div id="filtroMSPGroup" class="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-300"><label class="text-xs font-bold text-slate-600 px-1">MSP:</label><select id="filtroMSP" onchange="aggiornaCalendario()" class="bg-white text-xs font-bold text-slate-800 rounded px-2 py-1 border border-slate-300"><option value="TUTTI">Tutti</option></select></div>
+<div id="filtroCercaGroup" class="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-300"><label class="text-xs font-bold text-slate-600 px-1"><i class="fa-solid fa-magnifying-glass mr-1"></i>Cerca:</label><input type="text" id="filtroPersonale" oninput="aggiornaCalendario()" placeholder="Cognome, Nome o MSP..." class="bg-white text-xs font-semibold text-slate-800 rounded px-2 py-1 border border-slate-300 w-56 focus:outline-none focus:ring-2 focus:ring-blue-500"></div>
+</div>
+<div id="pulsantiExcelCalendario" class="flex flex-wrap gap-2 hidden">
+<button type="button" onclick="esportaDatabaseExcel()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition flex items-center gap-1"><i class="fa-solid fa-file-export"></i> Salva Database Excel</button>
+<label class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition cursor-pointer flex items-center gap-1"><i class="fa-solid fa-file-import"></i> Carica Database Excel<input type="file" id="inputImportDatabaseCal" accept=".xlsx" class="hidden" onchange="importaDatabaseExcel(event)"></label>
+</div>
+</div>
+<div class="flex items-center gap-2"><span class="text-xs font-bold text-slate-600">Vista:</span><div class="inline-flex rounded-md shadow-sm"><button type="button" id="btnVistaSettimana" onclick="setModalitaVista('settimana')" class="px-3 py-1.5 text-xs font-bold rounded-l-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">Settimanale</button><button type="button" id="btnVistaMese" onclick="setModalitaVista('mese')" class="px-3 py-1.5 text-xs font-bold border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">Mensile</button><button type="button" id="btnVistaAnnuale" onclick="setModalitaVista('annuale')" class="px-3 py-1.5 text-xs font-bold rounded-r-lg border border-slate-300 bg-blue-600 text-white">Annuale</button></div></div>
+</div>
+<div class="mb-3 text-xs font-semibold text-slate-600 flex flex-wrap gap-2 items-center justify-between bg-slate-50 px-3 py-2 rounded border border-slate-200">
+<span id="labelFinestraData">Finestra: ---</span>
+<div class="flex flex-wrap items-center gap-2 text-[11px]">
+<span class="px-2 py-0.5 rounded bg-sky-100 border border-sky-300 text-sky-950 font-bold">Attività Ordinarie</span>
+<span class="px-2 py-0.5 rounded bg-slate-600 text-white font-bold">FE/FA</span>
+<span class="px-2 py-0.5 rounded bg-violet-600 text-white font-bold">MA</span>
+<span class="px-2 py-0.5 rounded bg-teal-600 text-white font-bold">RC</span>
+<span class="px-2 py-0.5 rounded bg-emerald-600 text-white font-bold">RF</span>
+<span class="px-2 py-0.5 rounded bg-rose-600 text-white font-bold">Rep. H24</span>
+<span class="px-2 py-0.5 rounded bg-amber-600 text-white font-bold">Rep. Mod.</span>
+<span class="px-2 py-0.5 rounded bg-orange-200 border border-orange-400 text-rose-900 font-black">Straord. (>7h36m)</span>
+</div>
+</div>
+<div class="overflow-x-auto"><div id="contenitoreGrigliaCalendario" class="min-w-[1200px]"></div></div>
+</div>
+</section>
 
-        <!-- SCHEDA ANAGRAFICA -->
-        <section id="sezione-anagrafica" class="tab-contenuto hidden space-y-6">
-            <div class="bg-white rounded-xl shadow-md p-5 border border-slate-200">
-                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 border-b pb-3">
-                    <div><h2 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-id-card text-blue-600"></i> Gestione Anagrafica Risorse & Turni</h2><p class="text-xs text-slate-500">Mappatura completa CID, Sede, CLAV, Contatti e Gruppo Reperibilità.</p></div>
-                </div>
-                <form id="formNuovoDipendente" onsubmit="aggiungiDipendente(event)" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 bg-slate-50 p-4 rounded-lg border border-slate-200 mb-6 text-xs">
-                    <div><label class="block font-bold text-slate-600 uppercase mb-1">CID *</label><input type="text" id="addCID" required class="w-full border rounded px-2 py-1 font-bold" placeholder="00426853"></div>
-                    <div><label class="block font-bold text-slate-600 uppercase mb-1">Cognome *</label><input type="text" id="addCognome" required class="w-full border rounded px-2 py-1 font-semibold"></div>
-                    <div><label class="block font-bold text-slate-600 uppercase mb-1">Nome *</label><input type="text" id="addNome" required class="w-full border rounded px-2 py-1 font-semibold"></div>
-                    <div><label class="block font-bold text-slate-600 uppercase mb-1">Suffisso Email</label><input type="text" id="addSuffisso" class="w-full border rounded px-2 py-1 font-semibold"></div>
-                    <div><label class="block font-bold text-slate-600 uppercase mb-1">MSP (CLAV) *</label><input type="text" id="addMSP" required class="w-full border rounded px-2 py-1 font-bold uppercase"></div>
-                    <div><label class="block font-bold text-slate-600 uppercase mb-1">C.d.L. *</label><input type="text" id="addCdL" required class="w-full border rounded px-2 py-1 font-bold uppercase"></div>
-                    <div><label class="block font-bold text-slate-600 uppercase mb-1">Classe *</label><select id="addClasse" required class="w-full border rounded px-2 py-1 font-bold"><option value="O">O - Operaio</option><option value="I" selected>I - Impiegato</option><option value="Q">Q - Quadro</option></select></div>
-                    <div><label class="block font-bold text-slate-600 uppercase mb-1">Distaccamento</label><input type="text" id="addDistaccamento" class="w-full border rounded px-2 py-1 font-semibold uppercase"></div>
-                    <div><label class="block font-bold text-slate-600 uppercase mb-1">Pat</label><select id="addPat" class="w-full border rounded px-2 py-1 font-bold"><option value="">---</option><option value="A">A</option><option value="B">B</option><option value="C">C</option></select></div>
-                    <div><label class="block font-bold text-slate-600 uppercase mb-1">Turno/Rep</label><select id="addTurnoRep" class="w-full border rounded px-2 py-1 font-bold text-amber-800"><option value="">Nessuno</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></div>
-                    <div><label class="block font-bold text-slate-600 uppercase mb-1">Sede Lavoro</label><select id="addSedeLavoro" class="w-full border rounded px-2 py-1 font-semibold"><option value="RE">Reggio Emilia (RE)</option><option value="PC">Piacenza (PC)</option><option value="PR">Parma (PR)</option><option value="MO">Modena (MO)</option><option value="BO">Bologna (BO)</option><option value="FE">Ferrara (FE)</option><option value="RA">Ravenna (RA)</option><option value="FC">Forlì-Cesena (FC)</option><option value="RN">Rimini (RN)</option></select></div>
-                    <div><label class="block font-bold text-slate-600 uppercase mb-1">Residenza</label><input type="text" id="addResidenza" class="w-full border rounded px-2 py-1 font-semibold"></div>
-                    <div><label class="block font-bold text-slate-600 uppercase mb-1">Cell. Lavoro</label><input type="text" id="addCellLavoro" class="w-full border rounded px-2 py-1 font-semibold"></div>
-                    <div><label class="block font-bold text-slate-600 uppercase mb-1">Cell. Privato</label><input type="text" id="addCellPrivato" class="w-full border rounded px-2 py-1 font-semibold"></div>
-                    <div class="col-span-2"><label class="block font-bold text-slate-600 uppercase mb-1">E-mail</label><input type="email" id="addEmail" class="w-full border rounded px-2 py-1 font-semibold"></div>
-                    <div><label class="block font-bold text-slate-600 uppercase mb-1">Ingresso MS</label><input type="text" id="addIngressoMS" placeholder="GG/MM/AAAA" class="w-full border rounded px-2 py-1 font-semibold"></div>
-                    <div><label class="block font-bold text-slate-600 uppercase mb-1">Quiescenza</label><input type="text" id="addQuiescenza" placeholder="GG/MM/AAAA" class="w-full border rounded px-2 py-1 font-semibold"></div>
-                    <div><label class="block font-bold text-slate-600 uppercase mb-1">Decorrenza Inq.</label><input type="text" id="addDecorrenzaInq" placeholder="GG/MM/AAAA" class="w-full border rounded px-2 py-1 font-semibold"></div>
-                    <div><label class="block font-bold text-slate-600 uppercase mb-1">Inq.</label><input type="text" id="addInq" class="w-full border rounded px-2 py-1 font-semibold"></div>
-                    <div class="col-span-2 md:col-span-4 lg:col-span-6 flex justify-end mt-2"><button type="submit" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1.5 px-4 rounded text-xs shadow transition flex items-center gap-1"><i class="fa-solid fa-plus"></i> Aggiungi Dipendente</button></div>
-                </form>
-                <div class="overflow-x-auto border border-slate-200 rounded-lg">
-                    <table class="w-full text-left border-collapse text-[11px] whitespace-nowrap">
-                        <thead><tr class="bg-slate-800 text-white uppercase font-bold">
-                            <th class="p-2 border-r border-slate-700">CID</th><th class="p-2 border-r border-slate-700">Cognome e Nome</th><th class="p-2 border-r border-slate-700">MSP</th><th class="p-2 border-r border-slate-700">C.d.L.</th><th class="p-2 border-r border-slate-700">Cl.</th><th class="p-2 border-r border-slate-700">Dist.</th><th class="p-2 border-r border-slate-700">Pat</th><th class="p-2 border-r border-slate-700">Rep</th><th class="p-2 border-r border-slate-700">Sede</th><th class="p-2 border-r border-slate-700">Residenza</th><th class="p-2 border-r border-slate-700">Cell. Lavoro</th><th class="p-2 border-r border-slate-700">E-mail</th><th class="p-2 border-r border-slate-700">Ingresso MS</th><th class="p-2 border-r border-slate-700">Decorr. Inq.</th><th class="p-2 border-r border-slate-700">Inq.</th><th class="p-2 text-center">Azione</th>
-                        </tr></thead>
-                        <tbody id="tabellaDipendenti" class="divide-y divide-slate-200 bg-white"></tbody>
-                    </table>
-                </div>
-            </div>
-        </section>
+<section id="sezione-anagrafica" class="tab-contenuto hidden space-y-6">
+<div class="bg-white rounded-xl shadow-md p-5 border border-slate-200">
+<div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 border-b pb-3">
+<div><h2 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-id-card text-blue-600"></i> Gestione Anagrafica Risorse & Turni</h2><p class="text-xs text-slate-500">Mappatura completa CID, Sede, CLAV, Contatti e Gruppo Reperibilità.</p></div>
+</div>
+<form id="formNuovoDipendente" onsubmit="aggiungiDipendente(event)" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 bg-slate-50 p-4 rounded-lg border border-slate-200 mb-6 text-xs">
+<div><label class="block font-bold text-slate-600 uppercase mb-1">CID *</label><input type="text" id="addCID" required class="w-full border rounded px-2 py-1 font-bold" placeholder="00426853"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Cognome *</label><input type="text" id="addCognome" required class="w-full border rounded px-2 py-1 font-semibold"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Nome *</label><input type="text" id="addNome" required class="w-full border rounded px-2 py-1 font-semibold"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Suffisso Email</label><input type="text" id="addSuffisso" class="w-full border rounded px-2 py-1 font-semibold"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">MSP (CLAV) *</label><input type="text" id="addMSP" required class="w-full border rounded px-2 py-1 font-bold uppercase"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">C.d.L. *</label><input type="text" id="addCdL" required class="w-full border rounded px-2 py-1 font-bold uppercase"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Classe *</label><select id="addClasse" required class="w-full border rounded px-2 py-1 font-bold"><option value="O">O - Operaio</option><option value="I" selected>I - Impiegato</option><option value="Q">Q - Quadro</option></select></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Distaccamento</label><input type="text" id="addDistaccamento" class="w-full border rounded px-2 py-1 font-semibold uppercase"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Pat</label><select id="addPat" class="w-full border rounded px-2 py-1 font-bold"><option value="">---</option><option value="A">A</option><option value="B">B</option><option value="C">C</option></select></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Turno/Rep</label><select id="addTurnoRep" class="w-full border rounded px-2 py-1 font-bold text-amber-800"><option value="">Nessuno</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Sede Lavoro</label><select id="addSedeLavoro" class="w-full border rounded px-2 py-1 font-semibold"><option value="RE">Reggio Emilia (RE)</option><option value="PC">Piacenza (PC)</option><option value="PR">Parma (PR)</option><option value="MO">Modena (MO)</option><option value="BO">Bologna (BO)</option><option value="FE">Ferrara (FE)</option><option value="RA">Ravenna (RA)</option><option value="FC">Forlì-Cesena (FC)</option><option value="RN">Rimini (RN)</option></select></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Residenza</label><input type="text" id="addResidenza" class="w-full border rounded px-2 py-1 font-semibold"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Cell. Lavoro</label><input type="text" id="addCellLavoro" class="w-full border rounded px-2 py-1 font-semibold"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Cell. Privato</label><input type="text" id="addCellPrivato" class="w-full border rounded px-2 py-1 font-semibold"></div>
+<div class="col-span-2"><label class="block font-bold text-slate-600 uppercase mb-1">E-mail</label><input type="email" id="addEmail" class="w-full border rounded px-2 py-1 font-semibold"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Ingresso MS</label><input type="text" id="addIngressoMS" placeholder="GG/MM/AAAA" class="w-full border rounded px-2 py-1 font-semibold"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Quiescenza</label><input type="text" id="addQuiescenza" placeholder="GG/MM/AAAA" class="w-full border rounded px-2 py-1 font-semibold"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Decorrenza Inq.</label><input type="text" id="addDecorrenzaInq" placeholder="GG/MM/AAAA" class="w-full border rounded px-2 py-1 font-semibold"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Inq.</label><input type="text" id="addInq" class="w-full border rounded px-2 py-1 font-semibold"></div>
+<div class="col-span-2 md:col-span-4 lg:col-span-6 flex justify-end mt-2"><button type="submit" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1.5 px-4 rounded text-xs shadow transition flex items-center gap-1"><i class="fa-solid fa-plus"></i> Aggiungi Dipendente</button></div>
+</form>
+<div class="overflow-x-auto border border-slate-200 rounded-lg">
+<table class="w-full text-left border-collapse text-[11px] whitespace-nowrap">
+<thead><tr class="bg-slate-800 text-white uppercase font-bold">
+<th class="p-2 border-r border-slate-700">CID</th><th class="p-2 border-r border-slate-700">Cognome e Nome</th><th class="p-2 border-r border-slate-700">MSP</th><th class="p-2 border-r border-slate-700">C.d.L.</th><th class="p-2 border-r border-slate-700">Cl.</th><th class="p-2 border-r border-slate-700">Dist.</th><th class="p-2 border-r border-slate-700">Pat</th><th class="p-2 border-r border-slate-700">Rep</th><th class="p-2 border-r border-slate-700">Sede</th><th class="p-2 border-r border-slate-700">Residenza</th><th class="p-2 border-r border-slate-700">Cell. Lavoro</th><th class="p-2 border-r border-slate-700">E-mail</th><th class="p-2 border-r border-slate-700">Ingresso MS</th><th class="p-2 border-r border-slate-700">Decorr. Inq.</th><th class="p-2 border-r border-slate-700">Inq.</th><th class="p-2 text-center">Azione</th>
+</tr></thead>
+<tbody id="tabellaDipendenti" class="divide-y divide-slate-200 bg-white"></tbody>
+</table>
+</div>
+</div>
+</section>
 
-        <!-- SCHEDA CAPEX -->
-        <section id="sezione-consuntivazione" class="tab-contenuto hidden space-y-6">
-            <div class="bg-white rounded-xl shadow-md p-5 border border-slate-200">
-                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 border-b pb-3">
-                    <div><h2 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-chart-pie text-emerald-600"></i> Consuntivazione CAPEX - Capitalizzazione</h2><p class="text-xs text-slate-500">Consuntivazione per C.D.L. omogeneo. Operativi (CL=O) esclusi. Quadri (CL=Q) separati.</p></div>
-                </div>
-                <div class="grid grid-cols-2 md:grid-cols-6 gap-3 bg-slate-50 p-4 rounded-lg border border-slate-200 mb-4">
-                    <div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Anno</label><select id="consAnno" onchange="aggiornaConsuntivazione()" class="w-full border rounded px-2 py-1 text-xs font-bold"></select></div>
-                    <div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Mese</label><div class="flex gap-1"><button type="button" onclick="navigaMeseConsunt(-1)" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-2 py-1 rounded text-xs"><i class="fa-solid fa-chevron-left"></i></button><select id="consMese" onchange="onCambioMeseConsunt()" class="flex-1 border rounded px-2 py-1 text-xs font-bold"><option value="0">Gennaio</option><option value="1">Febbraio</option><option value="2">Marzo</option><option value="3">Aprile</option><option value="4">Maggio</option><option value="5">Giugno</option><option value="6">Luglio</option><option value="7">Agosto</option><option value="8">Settembre</option><option value="9">Ottobre</option><option value="10">Novembre</option><option value="11">Dicembre</option></select><button type="button" onclick="navigaMeseConsunt(1)" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-2 py-1 rounded text-xs"><i class="fa-solid fa-chevron-right"></i></button></div></div>
-                    <div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Settimana</label><div class="flex gap-1"><button type="button" onclick="navigaSettimanaConsunt(-1)" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-2 py-1 rounded text-xs"><i class="fa-solid fa-chevron-left"></i></button><select id="consSettimana" onchange="aggiornaConsuntivazione()" class="flex-1 border rounded px-2 py-1 text-xs font-bold"></select><button type="button" onclick="navigaSettimanaConsunt(1)" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-2 py-1 rounded text-xs"><i class="fa-solid fa-chevron-right"></i></button></div></div>
-                    <div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">MSP</label><select id="consMSP" onchange="aggiornaConsuntivazione()" class="w-full border rounded px-2 py-1 text-xs font-bold uppercase"><option value="TUTTI">Tutti</option></select></div>
-                    <div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">C.D.L.</label><select id="consCdL" onchange="aggiornaConsuntivazione()" class="w-full border rounded px-2 py-1 text-xs font-bold uppercase"><option value="TUTTI">Tutti i C.D.L.</option></select></div>
-                    <div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Tipo Report</label><select id="consTipoReport" onchange="aggiornaConsuntivazione()" class="w-full border rounded px-2 py-1 text-xs font-bold"><option value="I">Impiegati (I)</option><option value="Q">Quadri (Q)</option></select></div>
-                </div>
-                <div id="consInfoPeriodo" class="mb-3 bg-blue-50 border-l-4 border-blue-500 p-3 rounded-r text-xs"></div>
-                <div class="overflow-x-auto border border-slate-200 rounded-lg mb-4">
-                    <table class="w-full text-left border-collapse text-xs">
-                        <thead><tr class="bg-slate-800 text-white uppercase font-bold">
-                            <th class="p-2 border-r border-slate-700">CID</th><th class="p-2 border-r border-slate-700">Cognome Nome</th><th class="p-2 border-r border-slate-700">C.D.L.</th><th class="p-2 border-r border-slate-700">Data</th><th class="p-2 border-r border-slate-700">ODM/NTW</th><th class="p-2 border-r border-slate-700">Operazione</th><th class="p-2 border-r border-slate-700 text-center">Ore</th><th class="p-2 border-r border-slate-700 text-center">Min</th><th class="p-2 border-r border-slate-700 text-center bg-blue-700">Ore Norm</th><th class="p-2 border-r border-slate-700 text-center bg-blue-700">Min Norm</th><th class="p-2 border-r border-slate-700 text-center bg-purple-700">Ore Spec</th><th class="p-2 border-r border-slate-700 text-center bg-purple-700">Min Spec</th><th class="p-2 border-r border-slate-700 text-center">Qta Prod</th><th class="p-2 border-r border-slate-700 text-center">Flag</th><th class="p-2 border-r border-slate-700 text-center">Fase</th><th class="p-2 text-center">Azione</th>
-                        </tr></thead>
-                        <tbody id="tabellaConsuntivazione" class="divide-y divide-slate-200 bg-white"></tbody>
-                        <tfoot id="piedeConsuntivazione" class="bg-slate-100 font-bold"></tfoot>
-                    </table>
-                </div>
-                <div class="flex flex-wrap gap-2">
-                    <button type="button" onclick="aggiungiRigaConsuntivazione()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition flex items-center gap-1"><i class="fa-solid fa-plus"></i> Aggiungi Riga</button>
-                    <button type="button" onclick="esportaConsuntivazioneExcel()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition flex items-center gap-1"><i class="fa-solid fa-file-excel"></i> Esporta Report Settimana (.xlsx)</button>
-                    <button type="button" onclick="ricaricaDaCalendario()" class="bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition flex items-center gap-1"><i class="fa-solid fa-rotate"></i> Aggiorna da Calendario</button>
-                </div>
-                <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 mt-6">
-                    <h3 class="font-bold text-amber-900 text-sm mb-2 flex items-center gap-2"><i class="fa-solid fa-box-archive"></i> Archiviazione Anno Chiuso</h3>
-                    <p class="text-xs text-amber-800 mb-3">Esporta i dati di un anno specifico in un file Excel separato e rimuovili dal database corrente.</p>
-                    <div class="flex flex-wrap gap-3 items-end">
-                        <div><label class="block text-[11px] font-bold text-amber-800 uppercase mb-1">Anno da Archiviare</label><select id="archivioAnno" class="border rounded px-2 py-1 text-xs font-bold bg-white"></select></div>
-                        <button type="button" onclick="archiviaAnno()" class="bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition flex items-center gap-1"><i class="fa-solid fa-file-export"></i> Archivia Anno</button>
-                    </div>
-                </div>
-            </div>
-        </section>
+<section id="sezione-consuntivazione" class="tab-contenuto hidden space-y-6">
+<div class="bg-white rounded-xl shadow-md p-5 border border-slate-200">
+<div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 border-b pb-3">
+<div><h2 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-chart-pie text-emerald-600"></i> Consuntivazione CAPEX - Capitalizzazione</h2><p class="text-xs text-slate-500">Consuntivazione per C.D.L. omogeneo. Operativi (CL=O) esclusi. Quadri (CL=Q) separati.</p></div>
+</div>
+<div class="grid grid-cols-2 md:grid-cols-6 gap-3 bg-slate-50 p-4 rounded-lg border border-slate-200 mb-4">
+<div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Anno</label><select id="consAnno" onchange="aggiornaConsuntivazione()" class="w-full border rounded px-2 py-1 text-xs font-bold"></select></div>
+<div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Mese</label><div class="flex gap-1"><button type="button" onclick="navigaMeseConsunt(-1)" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-2 py-1 rounded text-xs"><i class="fa-solid fa-chevron-left"></i></button><select id="consMese" onchange="onCambioMeseConsunt()" class="flex-1 border rounded px-2 py-1 text-xs font-bold"><option value="0">Gennaio</option><option value="1">Febbraio</option><option value="2">Marzo</option><option value="3">Aprile</option><option value="4">Maggio</option><option value="5">Giugno</option><option value="6">Luglio</option><option value="7">Agosto</option><option value="8">Settembre</option><option value="9">Ottobre</option><option value="10">Novembre</option><option value="11">Dicembre</option></select><button type="button" onclick="navigaMeseConsunt(1)" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-2 py-1 rounded text-xs"><i class="fa-solid fa-chevron-right"></i></button></div></div>
+<div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Settimana</label><div class="flex gap-1"><button type="button" onclick="navigaSettimanaConsunt(-1)" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-2 py-1 rounded text-xs"><i class="fa-solid fa-chevron-left"></i></button><select id="consSettimana" onchange="aggiornaConsuntivazione()" class="flex-1 border rounded px-2 py-1 text-xs font-bold"></select><button type="button" onclick="navigaSettimanaConsunt(1)" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-2 py-1 rounded text-xs"><i class="fa-solid fa-chevron-right"></i></button></div></div>
+<div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">MSP</label><select id="consMSP" onchange="aggiornaConsuntivazione()" class="w-full border rounded px-2 py-1 text-xs font-bold uppercase"><option value="TUTTI">Tutti</option></select></div>
+<div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">C.D.L.</label><select id="consCdL" onchange="aggiornaConsuntivazione()" class="w-full border rounded px-2 py-1 text-xs font-bold uppercase"><option value="TUTTI">Tutti i C.D.L.</option></select></div>
+<div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Tipo Report</label><select id="consTipoReport" onchange="aggiornaConsuntivazione()" class="w-full border rounded px-2 py-1 text-xs font-bold"><option value="I">Impiegati (I)</option><option value="Q">Quadri (Q)</option></select></div>
+</div>
+<div id="consInfoPeriodo" class="mb-3 bg-blue-50 border-l-4 border-blue-500 p-3 rounded-r text-xs"></div>
+<div class="overflow-x-auto border border-slate-200 rounded-lg mb-4">
+<table class="w-full text-left border-collapse text-xs">
+<thead><tr class="bg-slate-800 text-white uppercase font-bold">
+<th class="p-2 border-r border-slate-700">CID</th><th class="p-2 border-r border-slate-700">Cognome Nome</th><th class="p-2 border-r border-slate-700">C.D.L.</th><th class="p-2 border-r border-slate-700">Data</th><th class="p-2 border-r border-slate-700">ODM/NTW</th><th class="p-2 border-r border-slate-700">Operazione</th><th class="p-2 border-r border-slate-700 text-center">Ore</th><th class="p-2 border-r border-slate-700 text-center">Min</th><th class="p-2 border-r border-slate-700 text-center bg-blue-700">Ore Norm</th><th class="p-2 border-r border-slate-700 text-center bg-blue-700">Min Norm</th><th class="p-2 border-r border-slate-700 text-center bg-purple-700">Ore Spec</th><th class="p-2 border-r border-slate-700 text-center bg-purple-700">Min Spec</th><th class="p-2 border-r border-slate-700 text-center">Qta Prod</th><th class="p-2 border-r border-slate-700 text-center">Flag</th><th class="p-2 border-r border-slate-700 text-center">Fase</th><th class="p-2 text-center">Azione</th>
+</tr></thead>
+<tbody id="tabellaConsuntivazione" class="divide-y divide-slate-200 bg-white"></tbody>
+<tfoot id="piedeConsuntivazione" class="bg-slate-100 font-bold"></tfoot>
+</table>
+</div>
+<div class="flex flex-wrap gap-2">
+<button type="button" onclick="aggiungiRigaConsuntivazione()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition flex items-center gap-1"><i class="fa-solid fa-plus"></i> Aggiungi Riga</button>
+<button type="button" onclick="esportaConsuntivazioneExcel()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition flex items-center gap-1"><i class="fa-solid fa-file-excel"></i> Esporta Report Settimana (.xlsx)</button>
+<button type="button" onclick="ricaricaDaCalendario()" class="bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition flex items-center gap-1"><i class="fa-solid fa-rotate"></i> Aggiorna da Calendario</button>
+</div>
+<div class="bg-amber-50 border border-amber-200 rounded-lg p-4 mt-6">
+<h3 class="font-bold text-amber-900 text-sm mb-2 flex items-center gap-2"><i class="fa-solid fa-box-archive"></i> Archiviazione Anno Chiuso</h3>
+<p class="text-xs text-amber-800 mb-3">Esporta i dati di un anno specifico in un file Excel separato e rimuovili dal database corrente.</p>
+<div class="flex flex-wrap gap-3 items-end">
+<div><label class="block text-[11px] font-bold text-amber-800 uppercase mb-1">Anno da Archiviare</label><select id="archivioAnno" class="border rounded px-2 py-1 text-xs font-bold bg-white"></select></div>
+<button type="button" onclick="archiviaAnno()" class="bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition flex items-center gap-1"><i class="fa-solid fa-file-export"></i> Archivia Anno</button>
+</div>
+</div>
+</div>
+</section>
 
-        <!-- SCHEDA REPORT -->
-        <section id="sezione-report" class="tab-contenuto hidden space-y-6">
-            <div class="bg-white rounded-xl shadow-md p-5 border border-slate-200">
-                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 border-b pb-3">
-                    <div><h2 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-chart-line text-purple-600"></i> Report & Estrazioni Dati</h2><p class="text-xs text-slate-500">Analisi avanzate su straordinari, capitalizzazione OdM e assenze.</p></div>
-                </div>
-                <div class="mb-4"><label class="block text-sm font-bold text-slate-700 mb-2"><i class="fa-solid fa-filter mr-1"></i> Seleziona Tipologia Report:</label><select id="tipoReport" onchange="cambiaTipoReport()" class="w-full md:w-96 border-2 border-purple-300 rounded-lg px-4 py-2 text-sm font-bold bg-purple-50 text-purple-900"><option value="straordinari">📊 Report Straordinari</option><option value="capitalizzazione">💰 Report Capitalizzazione per OdM</option><option value="assenze">🏖️ Report Assenze e Riposi</option></select></div>
-                <div class="report-filters">
-                    <div class="report-filter-group"><label>Data Inizio</label><input type="date" id="reportDataInizio" onchange="aggiornaReport()"></div>
-                    <div class="report-filter-group"><label>Data Fine</label><input type="date" id="reportDataFine" onchange="aggiornaReport()"></div>
-                    <div class="report-filter-group"><label>MSP</label><select id="reportMSP" onchange="aggiornaReport()"><option value="TUTTI">Tutti</option></select></div>
-                    <div class="report-filter-group"><label>Dipendente</label><select id="reportDipendente" onchange="aggiornaReport()"><option value="TUTTI">Tutti</option></select></div>
-                    <div class="report-filter-group" id="filtroOdMGroup" style="display:none"><label>Cerca OdM/NTW</label><input type="text" id="reportOdM" placeholder="Es. 400123..." onchange="aggiornaReport()"></div>
-                    <div class="report-filter-group" id="filtroTipoAssenzaGroup" style="display:none"><label>Tipo Assenza</label><select id="reportTipoAssenza" onchange="aggiornaReport()"><option value="TUTTI">Tutte</option><option value="FE">Ferie (FE)</option><option value="MA">Malattia (MA)</option><option value="RC">Riposo Comp. (RC)</option><option value="RF">Riposo Fis. (RF)</option></select></div>
-                </div>
-                <div class="report-actions">
-                    <button type="button" onclick="aggiornaReport()" class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-4 py-2 rounded-lg text-sm shadow transition flex items-center gap-2"><i class="fa-solid fa-rotate"></i> Aggiorna Report</button>
-                    <button type="button" onclick="esportaReportExcel()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2 rounded-lg text-sm shadow transition flex items-center gap-2"><i class="fa-solid fa-file-excel"></i> Esporta Excel</button>
-                    <button type="button" onclick="stampaReport()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg text-sm shadow transition flex items-center gap-2"><i class="fa-solid fa-print"></i> Stampa / PDF</button>
-                </div>
-                <div id="reportSummary" class="report-summary"></div>
-                <div class="overflow-x-auto"><table id="tabellaReport" class="report-table"><thead id="theadReport"></thead><tbody id="tbodyReport"></tbody><tfoot id="tfootReport"></tfoot></table></div>
-            </div>
-        </section>
+<section id="sezione-report" class="tab-contenuto hidden space-y-6">
+<div class="bg-white rounded-xl shadow-md p-5 border border-slate-200">
+<div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 border-b pb-3">
+<div><h2 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-chart-line text-purple-600"></i> Report & Estrazioni Dati</h2><p class="text-xs text-slate-500">Analisi avanzate su straordinari, capitalizzazione OdM e assenze.</p></div>
+</div>
+<div class="mb-4"><label class="block text-sm font-bold text-slate-700 mb-2"><i class="fa-solid fa-filter mr-1"></i> Seleziona Tipologia Report:</label><select id="tipoReport" onchange="cambiaTipoReport()" class="w-full md:w-96 border-2 border-purple-300 rounded-lg px-4 py-2 text-sm font-bold bg-purple-50 text-purple-900"><option value="straordinari">📊 Report Straordinari</option><option value="capitalizzazione">💰 Report Capitalizzazione per OdM</option><option value="assenze">🏖️ Report Assenze e Riposi</option></select></div>
+<div class="report-filters">
+<div class="report-filter-group"><label>Data Inizio</label><input type="date" id="reportDataInizio" onchange="aggiornaReport()"></div>
+<div class="report-filter-group"><label>Data Fine</label><input type="date" id="reportDataFine" onchange="aggiornaReport()"></div>
+<div class="report-filter-group"><label>MSP</label><select id="reportMSP" onchange="aggiornaReport()"><option value="TUTTI">Tutti</option></select></div>
+<div class="report-filter-group"><label>Dipendente</label><select id="reportDipendente" onchange="aggiornaReport()"><option value="TUTTI">Tutti</option></select></div>
+<div class="report-filter-group" id="filtroOdMGroup" style="display:none"><label>Cerca OdM/NTW</label><input type="text" id="reportOdM" placeholder="Es. 400123..." onchange="aggiornaReport()"></div>
+<div class="report-filter-group" id="filtroTipoAssenzaGroup" style="display:none"><label>Tipo Assenza</label><select id="reportTipoAssenza" onchange="aggiornaReport()"><option value="TUTTI">Tutte</option><option value="FE">Ferie (FE)</option><option value="MA">Malattia (MA)</option><option value="RC">Riposo Comp. (RC)</option><option value="RF">Riposo Fis. (RF)</option></select></div>
+</div>
+<div class="report-actions">
+<button type="button" onclick="aggiornaReport()" class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-4 py-2 rounded-lg text-sm shadow transition flex items-center gap-2"><i class="fa-solid fa-rotate"></i> Aggiorna Report</button>
+<button type="button" onclick="esportaReportExcel()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2 rounded-lg text-sm shadow transition flex items-center gap-2"><i class="fa-solid fa-file-excel"></i> Esporta Excel</button>
+<button type="button" onclick="stampaReport()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg text-sm shadow transition flex items-center gap-2"><i class="fa-solid fa-print"></i> Stampa / PDF</button>
+</div>
+<div id="reportSummary" class="report-summary"></div>
+<div class="overflow-x-auto"><table id="tabellaReport" class="report-table"><thead id="theadReport"></thead><tbody id="tbodyReport"></tbody><tfoot id="tfootReport"></tfoot></table></div>
+</div>
+</section>
 
-        <!-- SCHEDA PERS.REP -->
-        <section id="sezione-schema-nominativi" class="tab-contenuto hidden space-y-6">
-            <div class="bg-white rounded-xl shadow-md p-5 border border-slate-200">
-                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 border-b pb-3">
-                    <div class="flex flex-col md:flex-row md:items-center gap-3 flex-1">
-                        <h2 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-users text-blue-600"></i> Personale Reperibilità</h2>
-                        <div class="filtro-msp-compact"><label for="filtroMSPSchemaNominativi"><i class="fa-solid fa-filter mr-1"></i>MSP:</label><select id="filtroMSPSchemaNominativi" onchange="cambiaMSPSchemaNominativi()"><option value="">-- Seleziona MSP --</option></select></div>
-                        <div class="filtro-msp-compact"><label for="filtroTurnoSchemaPersREP"><i class="fa-solid fa-highlighter mr-1"></i>Turno:</label><select id="filtroTurnoSchemaPersREP" onchange="onCambiaFiltroTurnoPersREP()"><option value="">Tutti</option><option value="1">Gruppo 1</option><option value="2">Gruppo 2</option><option value="3">Gruppo 3</option><option value="4">Gruppo 4</option></select></div>
-                        <span id="infoMSPCorrente" class="text-xs font-semibold text-slate-600"></span>
-                    </div>
-                    <div class="flex flex-wrap gap-2">
-                        <button type="button" onclick="esportaSchemaNominativiExcel()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition flex items-center gap-1"><i class="fa-solid fa-file-export"></i> Esporta Excel</button>
-                        <label class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition cursor-pointer flex items-center gap-1"><i class="fa-solid fa-file-import"></i> Importa Excel<input type="file" id="inputImportSchemaNominativi" accept=".xlsx" class="hidden" onchange="importaSchemaNominativiExcel(event)"></label>
-                    </div>
-                </div>
-                <div class="container-tabelle-rep">
-                    <div><h3 class="font-bold text-slate-800 text-sm mb-2 flex items-center gap-2"><i class="fa-solid fa-user-tie text-blue-600"></i> Tecnici MSP - 4 risorse/turno</h3><div class="overflow-x-auto"><table class="tabella-nominativi tabella-nominativi-affiancata" id="tabellaTecnici"><thead><tr><th colspan="6" class="sezione-header">TECNICI MSP</th></tr><tr><th class="col-sq">SQ.</th><th class="col-nominativo">Nominativo</th><th class="col-sede">Sede</th><th class="col-residenza">Residenza</th><th class="col-cell">Cell. Lav.</th><th class="col-cell">Cell. Priv.</th></tr></thead><tbody id="tbodyTecnici"></tbody></table></div></div>
-                    <div><h3 class="font-bold text-slate-800 text-sm mb-2 flex items-center gap-2"><i class="fa-solid fa-user-gear text-amber-600"></i> Operativi MSP - 6 risorse/turno</h3><div class="overflow-x-auto"><table class="tabella-nominativi tabella-nominativi-affiancata" id="tabellaOperativi"><thead><tr><th colspan="6" class="sezione-header">OPERATIVI MSP</th></tr><tr><th class="col-sq">SQ.</th><th class="col-nominativo">Nominativo</th><th class="col-sede">Sede</th><th class="col-residenza">Residenza</th><th class="col-cell">Cell. Lav.</th><th class="col-cell">Cell. Priv.</th></tr></thead><tbody id="tbodyOperativi"></tbody></table></div></div>
-                </div>
-            </div>
-        </section>
+<section id="sezione-schema-nominativi" class="tab-contenuto hidden space-y-6">
+<div class="bg-white rounded-xl shadow-md p-5 border border-slate-200">
+<div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 border-b pb-3">
+<div class="flex flex-col md:flex-row md:items-center gap-3 flex-1">
+<h2 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-users text-blue-600"></i> Personale Reperibilità</h2>
+<div class="filtro-msp-compact"><label for="filtroMSPSchemaNominativi"><i class="fa-solid fa-filter mr-1"></i>MSP:</label><select id="filtroMSPSchemaNominativi" onchange="cambiaMSPSchemaNominativi()"><option value="">-- Seleziona MSP --</option></select></div>
+<div class="filtro-msp-compact"><label for="filtroTurnoSchemaPersREP"><i class="fa-solid fa-highlighter mr-1"></i>Turno:</label><select id="filtroTurnoSchemaPersREP" onchange="onCambiaFiltroTurnoPersREP()"><option value="">Tutti</option><option value="1">Gruppo 1</option><option value="2">Gruppo 2</option><option value="3">Gruppo 3</option><option value="4">Gruppo 4</option></select></div>
+<span id="infoMSPCorrente" class="text-xs font-semibold text-slate-600"></span>
+</div>
+<div class="flex flex-wrap gap-2">
+<button type="button" onclick="esportaSchemaNominativiExcel()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition flex items-center gap-1"><i class="fa-solid fa-file-export"></i> Esporta Excel</button>
+<label class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition cursor-pointer flex items-center gap-1"><i class="fa-solid fa-file-import"></i> Importa Excel<input type="file" id="inputImportSchemaNominativi" accept=".xlsx" class="hidden" onchange="importaSchemaNominativiExcel(event)"></label>
+</div>
+</div>
+<div class="container-tabelle-rep">
+<div><h3 class="font-bold text-slate-800 text-sm mb-2 flex items-center gap-2"><i class="fa-solid fa-user-tie text-blue-600"></i> Tecnici MSP - 4 risorse/turno</h3><div class="overflow-x-auto"><table class="tabella-nominativi tabella-nominativi-affiancata" id="tabellaTecnici"><thead><tr><th colspan="6" class="sezione-header">TECNICI MSP</th></tr><tr><th class="col-sq">SQ.</th><th class="col-nominativo">Nominativo</th><th class="col-sede">Sede</th><th class="col-residenza">Residenza</th><th class="col-cell">Cell. Lav.</th><th class="col-cell">Cell. Priv.</th></tr></thead><tbody id="tbodyTecnici"></tbody></table></div></div>
+<div><h3 class="font-bold text-slate-800 text-sm mb-2 flex items-center gap-2"><i class="fa-solid fa-user-gear text-amber-600"></i> Operativi MSP - 6 risorse/turno</h3><div class="overflow-x-auto"><table class="tabella-nominativi tabella-nominativi-affiancata" id="tabellaOperativi"><thead><tr><th colspan="6" class="sezione-header">OPERATIVI MSP</th></tr><tr><th class="col-sq">SQ.</th><th class="col-nominativo">Nominativo</th><th class="col-sede">Sede</th><th class="col-residenza">Residenza</th><th class="col-cell">Cell. Lav.</th><th class="col-cell">Cell. Priv.</th></tr></thead><tbody id="tbodyOperativi"></tbody></table></div></div>
+</div>
+</div>
+</section>
 
-        <!-- SCHEDA FESTIVITÀ -->
-        <section id="sezione-festivita" class="tab-contenuto hidden space-y-6">
-            <div class="bg-white rounded-xl shadow-md p-5 border border-slate-200">
-                <div class="flex justify-between items-center mb-1">
-                    <h2 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-church text-amber-600"></i> Gestione Festività Nazionali & Patroni EMR</h2>
-                    <button type="button" onclick="resetFestivitaPredefinite()" class="text-xs bg-slate-200 hover:bg-slate-300 font-bold px-2.5 py-1 rounded text-slate-700 transition"><i class="fa-solid fa-rotate-left mr-1"></i> Ripristina</button>
-                </div>
-                <p class="text-xs text-slate-500 mb-5">Elenco dei capoluoghi dell'Emilia-Romagna e festività aziendali.</p>
-                <form id="formNuovaFestivita" onsubmit="aggiungiFestivitaCustom(event)" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 bg-slate-50 p-4 rounded-lg border border-slate-200 mb-6">
-                    <div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Nome Festività / Patrono *</label><input type="text" id="addFestNome" required placeholder="Es. S. Prospero" class="w-full bg-white border rounded px-2 py-1 text-xs font-semibold"></div>
-                    <div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Giorno e Mese *</label><div class="flex gap-1"><input type="number" id="addFestGiorno" min="1" max="31" required placeholder="GG" class="w-1/2 bg-white border rounded px-2 py-1 text-xs font-bold text-center"><select id="addFestMese" required class="w-1/2 bg-white border rounded px-1 py-1 text-xs font-bold"><option value="0">Gen</option><option value="1">Feb</option><option value="2">Mar</option><option value="3">Apr</option><option value="4">Mag</option><option value="5">Giu</option><option value="6">Lug</option><option value="7">Ago</option><option value="8">Set</option><option value="9">Ott</option><option value="10">Nov</option><option value="11">Dic</option></select></div></div>
-                    <div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Tipo *</label><select id="addFestTipo" required onchange="toggleSedePatronoForm()" class="w-full bg-white border rounded px-2 py-1 text-xs font-bold"><option value="PATRONO">Santo Patrono Locale</option><option value="AZIENDALE">Festività Aziendale (Tutti)</option></select></div>
-                    <div id="boxFestSede"><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Sede / Comune *</label><input type="text" id="addFestSede" placeholder="Es. RE, PC, Bologna..." class="w-full bg-white border rounded px-2 py-1 text-xs font-semibold"></div>
-                    <div class="flex items-end"><button type="submit" class="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-1 px-2 rounded text-xs shadow transition"><i class="fa-solid fa-plus mr-1"></i> Aggiungi Festa</button></div>
-                </form>
-                <div class="overflow-x-auto"><table class="w-full text-left border-collapse text-xs"><thead><tr class="bg-slate-800 text-white uppercase font-bold"><th class="p-2.5">Nome Festività</th><th class="p-2.5">Data Ricorrenza</th><th class="p-2.5">Tipologia</th><th class="p-2.5">Sede / Comune Applicato</th><th class="p-2.5 text-center">Azione</th></tr></thead><tbody id="tabellaFestivita" class="divide-y divide-slate-200"></tbody></table></div>
-            </div>
-        </section>
+<section id="sezione-festivita" class="tab-contenuto hidden space-y-6">
+<div class="bg-white rounded-xl shadow-md p-5 border border-slate-200">
+<div class="flex justify-between items-center mb-1">
+<h2 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-church text-amber-600"></i> Gestione Festività Nazionali & Patroni EMR</h2>
+<button type="button" onclick="resetFestivitaPredefinite()" class="text-xs bg-slate-200 hover:bg-slate-300 font-bold px-2.5 py-1 rounded text-slate-700 transition"><i class="fa-solid fa-rotate-left mr-1"></i> Ripristina</button>
+</div>
+<p class="text-xs text-slate-500 mb-5">Elenco dei capoluoghi dell'Emilia-Romagna e festività aziendali.</p>
+<form id="formNuovaFestivita" onsubmit="aggiungiFestivitaCustom(event)" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 bg-slate-50 p-4 rounded-lg border border-slate-200 mb-6">
+<div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Nome Festività / Patrono *</label><input type="text" id="addFestNome" required placeholder="Es. S. Prospero" class="w-full bg-white border rounded px-2 py-1 text-xs font-semibold"></div>
+<div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Giorno e Mese *</label><div class="flex gap-1"><input type="number" id="addFestGiorno" min="1" max="31" required placeholder="GG" class="w-1/2 bg-white border rounded px-2 py-1 text-xs font-bold text-center"><select id="addFestMese" required class="w-1/2 bg-white border rounded px-1 py-1 text-xs font-bold"><option value="0">Gen</option><option value="1">Feb</option><option value="2">Mar</option><option value="3">Apr</option><option value="4">Mag</option><option value="5">Giu</option><option value="6">Lug</option><option value="7">Ago</option><option value="8">Set</option><option value="9">Ott</option><option value="10">Nov</option><option value="11">Dic</option></select></div></div>
+<div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Tipo *</label><select id="addFestTipo" required onchange="toggleSedePatronoForm()" class="w-full bg-white border rounded px-2 py-1 text-xs font-bold"><option value="PATRONO">Santo Patrono Locale</option><option value="AZIENDALE">Festività Aziendale (Tutti)</option></select></div>
+<div id="boxFestSede"><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Sede / Comune *</label><input type="text" id="addFestSede" placeholder="Es. RE, PC, Bologna..." class="w-full bg-white border rounded px-2 py-1 text-xs font-semibold"></div>
+<div class="flex items-end"><button type="submit" class="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-1 px-2 rounded text-xs shadow transition"><i class="fa-solid fa-plus mr-1"></i> Aggiungi Festa</button></div>
+</form>
+<div class="overflow-x-auto"><table class="w-full text-left border-collapse text-xs"><thead><tr class="bg-slate-800 text-white uppercase font-bold"><th class="p-2.5">Nome Festività</th><th class="p-2.5">Data Ricorrenza</th><th class="p-2.5">Tipologia</th><th class="p-2.5">Sede / Comune Applicato</th><th class="p-2.5 text-center">Azione</th></tr></thead><tbody id="tabellaFestivita" class="divide-y divide-slate-200"></tbody></table></div>
+</div>
+</section>
 
-        <!-- SCHEDA REPERIBILITÀ -->
-        <section id="sezione-reperibilita" class="tab-contenuto hidden space-y-6">
-            <div class="bg-white rounded-xl shadow-md p-5 border border-slate-200">
-                <div class="flex flex-col md:flex-row justify-between items-center gap-4 mb-5 border-b pb-4">
-                    <h2 class="font-bold text-slate-800 text-base flex items-center gap-2 flex-wrap"><i class="fa-solid fa-calendar-check text-rose-600"></i> MS dist. Reggio E. REPERIBILITA' ANNO <select id="annoSchemaReperibilita" onchange="generaTabellaReperibilita(this.value)" class="bg-white text-rose-600 font-black text-lg border border-rose-200 rounded px-2 py-1 ml-2"></select><span class="text-slate-400 mx-2">|</span><select id="filtroTurnoSchema" onchange="onCambiaFiltroTurnoSchema()" class="bg-white text-slate-700 font-bold text-sm border border-slate-300 rounded px-2 py-1"><option value="">Evidenzia Turno: Tutti</option><option value="1">Evidenzia Gruppo 1</option><option value="2">Evidenzia Gruppo 2</option><option value="3">Evidenzia Gruppo 3</option><option value="4">Evidenzia Gruppo 4</option></select></h2>
-                    <div class="flex flex-wrap items-center gap-2">
-                        <div class="flex flex-wrap items-center gap-2 text-[12px] font-semibold text-slate-600 bg-slate-50 px-3 py-2 rounded border border-slate-200"><span class="px-2 py-0.5 rounded bg-amber-100 border border-amber-200 text-amber-800">Weekend</span><span class="px-2 py-0.5 rounded bg-rose-100 border border-rose-200 text-rose-800">Festivi</span><span class="font-black text-blue-600">1</span><span class="font-black text-emerald-600">2</span><span class="font-black text-amber-600">3</span><span class="font-black text-purple-600">4</span> = Gruppo Reperibilità</div>
-                        <button type="button" onclick="stampaSchemaReperibilita()" class="no-print bg-slate-700 hover:bg-slate-800 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition flex items-center gap-1 ml-2"><i class="fa-solid fa-print"></i> Stampa / PDF</button>
-                    </div>
-                </div>
-                <div id="boxInfoSaltoTurno" class="mb-4 bg-gradient-to-r from-indigo-50 to-blue-50 border-l-4 border-indigo-500 p-3 rounded-r-lg no-print">
-                    <div class="flex items-start gap-3"><i class="fa-solid fa-circle-info text-indigo-500 text-lg mt-0.5"></i><div class="flex-1"><div class="font-bold text-indigo-900 text-sm">Informazioni Salto Turno - Anno <span id="infoSaltoAnno">2026</span></div><div class="text-xs text-slate-700 mt-1"><span class="font-semibold">Turno che salta:</span> <span id="infoSaltoTurno" class="font-black text-indigo-700 text-base">-</span><span class="mx-2">|</span><span class="font-semibold">Settimana ISO:</span> <span id="infoSaltoSettimana" class="font-black text-indigo-700 text-base">-</span><span class="mx-2">|</span><span class="font-semibold">Periodo:</span> <span id="infoSaltoPeriodo" class="font-semibold text-slate-800">-</span></div><div class="text-[11px] text-slate-500 mt-1 italic">Il salto turno avviene nella prima settimana successiva a quella che contiene il 6 gennaio (Epifania).</div></div></div>
-                </div>
-                <div class="schema-reperibilita-wrapper"><table class="schema-reperibilita-table text-center border-collapse text-xs"><caption id="captionStampaReperibilita" class="caption-top text-lg font-bold text-slate-800 mb-2"></caption><tbody id="tabellaSchemaReperibilita"></tbody></table></div>
-            </div>
-        </section>
+<section id="sezione-reperibilita" class="tab-contenuto hidden space-y-6">
+<div class="bg-white rounded-xl shadow-md p-5 border border-slate-200">
+<div class="flex flex-col md:flex-row justify-between items-center gap-4 mb-5 border-b pb-4">
+<h2 class="font-bold text-slate-800 text-base flex items-center gap-2 flex-wrap"><i class="fa-solid fa-calendar-check text-rose-600"></i> MS dist. Reggio E. REPERIBILITA' ANNO <select id="annoSchemaReperibilita" onchange="generaTabellaReperibilita(this.value)" class="bg-white text-rose-600 font-black text-lg border border-rose-200 rounded px-2 py-1 ml-2"></select><span class="text-slate-400 mx-2">|</span><select id="filtroTurnoSchema" onchange="onCambiaFiltroTurnoSchema()" class="bg-white text-slate-700 font-bold text-sm border border-slate-300 rounded px-2 py-1"><option value="">Evidenzia Turno: Tutti</option><option value="1">Evidenzia Gruppo 1</option><option value="2">Evidenzia Gruppo 2</option><option value="3">Evidenzia Gruppo 3</option><option value="4">Evidenzia Gruppo 4</option></select></h2>
+<div class="flex flex-wrap items-center gap-2">
+<div class="flex flex-wrap items-center gap-2 text-[12px] font-semibold text-slate-600 bg-slate-50 px-3 py-2 rounded border border-slate-200"><span class="px-2 py-0.5 rounded bg-amber-100 border border-amber-200 text-amber-800">Weekend</span><span class="px-2 py-0.5 rounded bg-rose-100 border border-rose-200 text-rose-800">Festivi</span><span class="font-black text-blue-600">1</span><span class="font-black text-emerald-600">2</span><span class="font-black text-amber-600">3</span><span class="font-black text-purple-600">4</span> = Gruppo Reperibilità</div>
+<button type="button" onclick="stampaSchemaReperibilita()" class="no-print bg-slate-700 hover:bg-slate-800 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition flex items-center gap-1 ml-2"><i class="fa-solid fa-print"></i> Stampa / PDF</button>
+</div>
+</div>
+<div id="boxInfoSaltoTurno" class="mb-4 bg-gradient-to-r from-indigo-50 to-blue-50 border-l-4 border-indigo-500 p-3 rounded-r-lg no-print">
+<div class="flex items-start gap-3"><i class="fa-solid fa-circle-info text-indigo-500 text-lg mt-0.5"></i><div class="flex-1"><div class="font-bold text-indigo-900 text-sm">Informazioni Salto Turno - Anno <span id="infoSaltoAnno">2026</span></div><div class="text-xs text-slate-700 mt-1"><span class="font-semibold">Turno che salta:</span> <span id="infoSaltoTurno" class="font-black text-indigo-700 text-base">-</span><span class="mx-2">|</span><span class="font-semibold">Settimana ISO:</span> <span id="infoSaltoSettimana" class="font-black text-indigo-700 text-base">-</span><span class="mx-2">|</span><span class="font-semibold">Periodo:</span> <span id="infoSaltoPeriodo" class="font-semibold text-slate-800">-</span></div><div class="text-[11px] text-slate-500 mt-1 italic">Il salto turno avviene nella prima settimana successiva a quella che contiene il 6 gennaio (Epifania).</div></div></div>
+</div>
+<div class="schema-reperibilita-wrapper"><table class="schema-reperibilita-table text-center border-collapse text-xs"><caption id="captionStampaReperibilita" class="caption-top text-lg font-bold text-slate-800 mb-2"></caption><tbody id="tabellaSchemaReperibilita"></tbody></table></div>
+</div>
+</section>
 
-    </main>
+</main>
 </div>
 
-<!-- MODALI (invariati) -->
 <div id="modalAttivita" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden flex items-center justify-center z-50 p-4">
-    <div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-5 border border-slate-200 space-y-4 modal-scroll">
-        <div class="flex justify-between items-center border-b pb-2"><h3 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-calendar-plus text-blue-600"></i> <span id="modalTitolo">Assegna Attività</span></h3><button type="button" onclick="chiudiModalAttivita()" class="text-slate-400 hover:text-slate-600 text-lg"><i class="fa-solid fa-xmark"></i></button></div>
-        <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs space-y-1"><div><strong>Dipendente:</strong> <span id="mNomeDip" class="text-blue-700 font-bold">---</span></div><div><strong>Data:</strong> <span id="mData" class="text-slate-700 font-semibold">---</span> | <strong>Sede:</strong> <span id="mSede" class="font-bold text-amber-800">---</span></div><div id="mInfoReperibAuto" class="text-[11px] font-bold text-rose-700 pt-1"></div></div>
-        <div><label class="block text-xs font-bold text-slate-600 uppercase mb-2">Inserimenti ed Eccezioni del Giorno:</label><div id="mListaAttivita" class="space-y-2 max-h-40 overflow-y-auto p-1"></div></div>
-        <form id="formNuovaAttivita" onsubmit="salvaAttivitaModal(event)" class="border-t pt-3 space-y-3">
-            <input type="hidden" id="modificaAttId" value="">
-            <div class="grid grid-cols-2 gap-2"><div><label class="block text-[11px] font-bold text-slate-600 uppercase">Causale / Tipo *</label><select id="mTipo" onchange="toggleFormTipoModal()" class="w-full border rounded px-2 py-1 text-xs font-bold"><option value="ODM">Lavoro con OdM</option><option value="FE">FE - Ferie</option><option value="MA">MA - Malattia</option><option value="RC">RC - Riposo Compensativo</option><option value="RF">RF - Riposo Fisiologico</option><option value="FA">FA - Ex Festività</option><option value="REPERIBILE_ADD">Aggiungi Reperibilità</option><option value="REPERIBILE_DEL">CANCELLA Reperibilità</option></select></div><div id="boxODM"><label class="block text-[11px] font-bold text-slate-600 uppercase">OdM / NTW *</label><input type="text" id="mODM" placeholder="4001234567" class="w-full border rounded px-2 py-1 text-xs font-semibold" list="datalistODM" autocomplete="on"></div></div>
-            <div id="boxDescrizione"><label class="block text-[11px] font-bold text-slate-600 uppercase">Descrizione / Note</label><input type="text" id="mDescrizione" class="w-full border rounded px-2 py-1 text-xs font-semibold" list="datalistDescrizione" autocomplete="on"></div>
-            <div id="boxDurata" class="grid grid-cols-2 gap-2"><div><label class="block text-[11px] font-bold text-slate-600 uppercase">Durata Ore / Minuti *</label><div class="flex items-center gap-1"><input type="number" id="mOre" min="0" max="24" value="7" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"><span class="font-bold text-slate-400">:</span><input type="number" id="mMin" min="0" max="59" value="36" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"></div></div><div id="boxOP"><label class="block text-[11px] font-bold text-slate-600 uppercase">Operazione (OP)</label><input type="text" id="mOP" value="0010" class="w-full border rounded px-2 py-1 text-xs font-semibold"></div></div>
-            <div id="boxOreSpeciali" class="grid grid-cols-2 gap-2 bg-blue-50 p-2 rounded border border-blue-200"><div><label class="block text-[11px] font-bold text-blue-800 uppercase">Ore Norm / Min Norm</label><div class="flex items-center gap-1"><input type="number" id="mOreNorm" min="0" max="24" value="0" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"><span class="font-bold text-slate-400">:</span><input type="number" id="mMinNorm" min="0" max="59" value="0" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"></div></div><div><label class="block text-[11px] font-bold text-purple-800 uppercase">Ore Spec / Min Spec</label><div class="flex items-center gap-1"><input type="number" id="mOreSpec" min="0" max="24" value="0" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"><span class="font-bold text-slate-400">:</span><input type="number" id="mMinSpec" min="0" max="59" value="0" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"></div></div><div class="col-span-2 text-[11px] text-slate-600 italic" id="mValidazioneOre"></div></div>
-            <div class="flex justify-end gap-2 pt-2"><button type="button" onclick="chiudiModalAttivita()" class="px-3 py-1.5 rounded text-xs font-semibold bg-slate-200 text-slate-700 hover:bg-slate-300">Chiudi</button><button type="submit" class="px-4 py-1.5 rounded text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 shadow" id="btnSalvaAttivita">Applica</button></div>
-        </form>
-    </div>
+<div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-5 border border-slate-200 space-y-4 modal-scroll">
+<div class="flex justify-between items-center border-b pb-2"><h3 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-calendar-plus text-blue-600"></i> <span id="modalTitolo">Assegna Attività</span></h3><button type="button" onclick="chiudiModalAttivita()" class="text-slate-400 hover:text-slate-600 text-lg"><i class="fa-solid fa-xmark"></i></button></div>
+<div class="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs space-y-1"><div><strong>Dipendente:</strong> <span id="mNomeDip" class="text-blue-700 font-bold">---</span></div><div><strong>Data:</strong> <span id="mData" class="text-slate-700 font-semibold">---</span> | <strong>Sede:</strong> <span id="mSede" class="font-bold text-amber-800">---</span></div><div id="mInfoReperibAuto" class="text-[11px] font-bold text-rose-700 pt-1"></div></div>
+<div><label class="block text-xs font-bold text-slate-600 uppercase mb-2">Inserimenti ed Eccezioni del Giorno:</label><div id="mListaAttivita" class="space-y-2 max-h-40 overflow-y-auto p-1"></div></div>
+<form id="formNuovaAttivita" onsubmit="salvaAttivitaModal(event)" class="border-t pt-3 space-y-3">
+<input type="hidden" id="modificaAttId" value="">
+<div class="grid grid-cols-2 gap-2"><div><label class="block text-[11px] font-bold text-slate-600 uppercase">Causale / Tipo *</label><select id="mTipo" onchange="toggleFormTipoModal()" class="w-full border rounded px-2 py-1 text-xs font-bold"><option value="ODM">Lavoro con OdM</option><option value="FE">FE - Ferie</option><option value="MA">MA - Malattia</option><option value="RC">RC - Riposo Compensativo</option><option value="RF">RF - Riposo Fisiologico</option><option value="FA">FA - Ex Festività</option><option value="REPERIBILE_ADD">Aggiungi Reperibilità</option><option value="REPERIBILE_DEL">CANCELLA Reperibilità</option></select></div><div id="boxODM"><label class="block text-[11px] font-bold text-slate-600 uppercase">OdM / NTW *</label><input type="text" id="mODM" placeholder="4001234567" class="w-full border rounded px-2 py-1 text-xs font-semibold" list="datalistODM" autocomplete="on"></div></div>
+<div id="boxDescrizione"><label class="block text-[11px] font-bold text-slate-600 uppercase">Descrizione / Note</label><input type="text" id="mDescrizione" class="w-full border rounded px-2 py-1 text-xs font-semibold" list="datalistDescrizione" autocomplete="on"></div>
+<div id="boxDurata" class="grid grid-cols-2 gap-2"><div><label class="block text-[11px] font-bold text-slate-600 uppercase">Durata Ore / Minuti *</label><div class="flex items-center gap-1"><input type="number" id="mOre" min="0" max="24" value="7" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"><span class="font-bold text-slate-400">:</span><input type="number" id="mMin" min="0" max="59" value="36" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"></div></div><div id="boxOP"><label class="block text-[11px] font-bold text-slate-600 uppercase">Operazione (OP)</label><input type="text" id="mOP" value="0010" class="w-full border rounded px-2 py-1 text-xs font-semibold"></div></div>
+<div id="boxOreSpeciali" class="grid grid-cols-2 gap-2 bg-blue-50 p-2 rounded border border-blue-200"><div><label class="block text-[11px] font-bold text-blue-800 uppercase">Ore Norm / Min Norm</label><div class="flex items-center gap-1"><input type="number" id="mOreNorm" min="0" max="24" value="0" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"><span class="font-bold text-slate-400">:</span><input type="number" id="mMinNorm" min="0" max="59" value="0" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"></div></div><div><label class="block text-[11px] font-bold text-purple-800 uppercase">Ore Spec / Min Spec</label><div class="flex items-center gap-1"><input type="number" id="mOreSpec" min="0" max="24" value="0" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"><span class="font-bold text-slate-400">:</span><input type="number" id="mMinSpec" min="0" max="59" value="0" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"></div></div><div class="col-span-2 text-[11px] text-slate-600 italic" id="mValidazioneOre"></div></div>
+<div class="flex justify-end gap-2 pt-2"><button type="button" onclick="chiudiModalAttivita()" class="px-3 py-1.5 rounded text-xs font-semibold bg-slate-200 text-slate-700 hover:bg-slate-300">Chiudi</button><button type="submit" class="px-4 py-1.5 rounded text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 shadow" id="btnSalvaAttivita">Applica</button></div>
+</form>
+</div>
 </div>
 
 <div id="modalCopiaAttivita" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden flex items-center justify-center z-[60] p-4">
-    <div class="bg-white rounded-xl shadow-2xl max-w-md w-full p-5 border border-slate-200 space-y-4">
-        <div class="flex justify-between items-center border-b pb-2"><h3 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-copy text-blue-600"></i> Copia Attività</h3><button type="button" onclick="chiudiModalCopia()" class="text-slate-400 hover:text-slate-600 text-lg"><i class="fa-solid fa-xmark"></i></button></div>
-        <div class="bg-blue-50 p-3 rounded-lg border border-blue-200 text-xs"><div><strong>Attività originale:</strong> <span id="copiaInfoAtt" class="text-blue-700 font-bold">---</span></div><div><strong>Data:</strong> <span id="copiaInfoData" class="text-slate-700 font-semibold">---</span></div></div>
-        <form id="formCopiaAttivita" onsubmit="confermaCopiaAttivita(event)" class="space-y-3"><input type="hidden" id="copiaAttId"><div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Nuova Data *</label><input type="date" id="copiaNuovaData" required class="w-full border rounded px-2 py-1 text-xs font-bold"></div><div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Nuovo Dipendente (opzionale)</label><select id="copiaNuovoDip" class="w-full border rounded px-2 py-1 text-xs font-bold"><option value="">-- Mantieni stesso dipendente --</option></select></div><div class="flex items-center gap-2"><input type="checkbox" id="copiaEliminaOriginale" class="rounded"><label for="copiaEliminaOriginale" class="text-xs font-semibold text-slate-700">Elimina attività originale dopo la copia</label></div><div class="flex justify-end gap-2 pt-2"><button type="button" onclick="chiudiModalCopia()" class="px-3 py-1.5 rounded text-xs font-semibold bg-slate-200 text-slate-700 hover:bg-slate-300">Annulla</button><button type="submit" class="px-4 py-1.5 rounded text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 shadow">Copia</button></div></form>
-    </div>
+<div class="bg-white rounded-xl shadow-2xl max-w-md w-full p-5 border border-slate-200 space-y-4">
+<div class="flex justify-between items-center border-b pb-2"><h3 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-copy text-blue-600"></i> Copia Attività</h3><button type="button" onclick="chiudiModalCopia()" class="text-slate-400 hover:text-slate-600 text-lg"><i class="fa-solid fa-xmark"></i></button></div>
+<div class="bg-blue-50 p-3 rounded-lg border border-blue-200 text-xs"><div><strong>Attività originale:</strong> <span id="copiaInfoAtt" class="text-blue-700 font-bold">---</span></div><div><strong>Data:</strong> <span id="copiaInfoData" class="text-slate-700 font-semibold">---</span></div></div>
+<form id="formCopiaAttivita" onsubmit="confermaCopiaAttivita(event)" class="space-y-3"><input type="hidden" id="copiaAttId"><div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Nuova Data *</label><input type="date" id="copiaNuovaData" required class="w-full border rounded px-2 py-1 text-xs font-bold"></div><div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Nuovo Dipendente (opzionale)</label><select id="copiaNuovoDip" class="w-full border rounded px-2 py-1 text-xs font-bold"><option value="">-- Mantieni stesso dipendente --</option></select></div><div class="flex items-center gap-2"><input type="checkbox" id="copiaEliminaOriginale" class="rounded"><label for="copiaEliminaOriginale" class="text-xs font-semibold text-slate-700">Elimina attività originale dopo la copia</label></div><div class="flex justify-end gap-2 pt-2"><button type="button" onclick="chiudiModalCopia()" class="px-3 py-1.5 rounded text-xs font-semibold bg-slate-200 text-slate-700 hover:bg-slate-300">Annulla</button><button type="submit" class="px-4 py-1.5 rounded text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 shadow">Copia</button></div></form>
+</div>
 </div>
 
 <div id="modalModificaDip" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden flex items-center justify-center z-50 p-4">
-    <div class="bg-white rounded-xl shadow-2xl max-w-4xl w-full p-5 border border-slate-200 space-y-4 modal-scroll">
-        <div class="flex justify-between items-center border-b pb-2"><h3 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-user-pen text-blue-600"></i> Modifica Dipendente</h3><button type="button" onclick="chiudiModalModificaDip()" class="text-slate-400 hover:text-slate-600 text-lg"><i class="fa-solid fa-xmark"></i></button></div>
-        <form id="formModificaDipendente" onsubmit="salvaModificaDipendente(event)" class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-            <input type="hidden" id="editCID_old">
-            <div><label class="block font-bold text-slate-600 uppercase mb-1">CID *</label><input type="text" id="editCID" required class="w-full border rounded px-2 py-1 font-bold bg-slate-100" readonly></div>
-            <div><label class="block font-bold text-slate-600 uppercase mb-1">Cognome *</label><input type="text" id="editCognome" required class="w-full border rounded px-2 py-1 font-semibold"></div>
-            <div><label class="block font-bold text-slate-600 uppercase mb-1">Nome *</label><input type="text" id="editNome" required class="w-full border rounded px-2 py-1 font-semibold"></div>
-            <div><label class="block font-bold text-slate-600 uppercase mb-1">Suffisso Email</label><input type="text" id="editSuffisso" class="w-full border rounded px-2 py-1 font-semibold"></div>
-            <div><label class="block font-bold text-slate-600 uppercase mb-1">MSP (CLAV) *</label><input type="text" id="editMSP" required class="w-full border rounded px-2 py-1 font-bold uppercase"></div>
-            <div><label class="block font-bold text-slate-600 uppercase mb-1">C.d.L. *</label><input type="text" id="editCdL" required class="w-full border rounded px-2 py-1 font-bold uppercase"></div>
-            <div><label class="block font-bold text-slate-600 uppercase mb-1">Classe *</label><select id="editClasse" required class="w-full border rounded px-2 py-1 font-bold"><option value="O">O</option><option value="I">I</option><option value="Q">Q</option></select></div>
-            <div><label class="block font-bold text-slate-600 uppercase mb-1">Distaccamento</label><input type="text" id="editDistaccamento" class="w-full border rounded px-2 py-1 font-semibold uppercase"></div>
-            <div><label class="block font-bold text-slate-600 uppercase mb-1">Pat</label><select id="editPat" class="w-full border rounded px-2 py-1 font-bold"><option value="">---</option><option value="A">A</option><option value="B">B</option><option value="C">C</option></select></div>
-            <div><label class="block font-bold text-slate-600 uppercase mb-1">Turno/Rep</label><select id="editTurnoRep" class="w-full border rounded px-2 py-1 font-bold text-amber-800"><option value="">Nessuno</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></div>
-            <div><label class="block font-bold text-slate-600 uppercase mb-1">Sede Lavoro</label><select id="editSedeLavoro" class="w-full border rounded px-2 py-1 font-semibold"><option value="RE">RE</option><option value="PC">PC</option><option value="PR">PR</option><option value="MO">MO</option><option value="BO">BO</option><option value="FE">FE</option><option value="RA">RA</option><option value="FC">FC</option><option value="RN">RN</option></select></div>
-            <div><label class="block font-bold text-slate-600 uppercase mb-1">Residenza</label><input type="text" id="editResidenza" class="w-full border rounded px-2 py-1 font-semibold"></div>
-            <div><label class="block font-bold text-slate-600 uppercase mb-1">Cell. Lavoro</label><input type="text" id="editCellLavoro" class="w-full border rounded px-2 py-1 font-semibold"></div>
-            <div><label class="block font-bold text-slate-600 uppercase mb-1">Cell. Privato</label><input type="text" id="editCellPrivato" class="w-full border rounded px-2 py-1 font-semibold"></div>
-            <div class="col-span-2"><label class="block font-bold text-slate-600 uppercase mb-1">E-mail</label><input type="email" id="editEmail" class="w-full border rounded px-2 py-1 font-semibold"></div>
-            <div><label class="block font-bold text-slate-600 uppercase mb-1">Ingresso MS</label><input type="text" id="editIngressoMS" class="w-full border rounded px-2 py-1 font-semibold"></div>
-            <div><label class="block font-bold text-slate-600 uppercase mb-1">Quiescenza</label><input type="text" id="editQuiescenza" class="w-full border rounded px-2 py-1 font-semibold"></div>
-            <div><label class="block font-bold text-slate-600 uppercase mb-1">Decorrenza Inq.</label><input type="text" id="editDecorrenzaInq" class="w-full border rounded px-2 py-1 font-semibold"></div>
-            <div><label class="block font-bold text-slate-600 uppercase mb-1">Inq.</label><input type="text" id="editInq" class="w-full border rounded px-2 py-1 font-semibold"></div>
-            <div class="col-span-2 md:col-span-4 flex justify-end gap-2 pt-2 border-t mt-2"><button type="button" onclick="chiudiModalModificaDip()" class="px-4 py-1.5 rounded text-xs font-semibold bg-slate-200 text-slate-700 hover:bg-slate-300">Annulla</button><button type="submit" class="px-4 py-1.5 rounded text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 shadow">Salva Modifiche</button></div>
-        </form>
-    </div>
+<div class="bg-white rounded-xl shadow-2xl max-w-4xl w-full p-5 border border-slate-200 space-y-4 modal-scroll">
+<div class="flex justify-between items-center border-b pb-2"><h3 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-user-pen text-blue-600"></i> Modifica Dipendente</h3><button type="button" onclick="chiudiModalModificaDip()" class="text-slate-400 hover:text-slate-600 text-lg"><i class="fa-solid fa-xmark"></i></button></div>
+<form id="formModificaDipendente" onsubmit="salvaModificaDipendente(event)" class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+<input type="hidden" id="editCID_old">
+<div><label class="block font-bold text-slate-600 uppercase mb-1">CID *</label><input type="text" id="editCID" required class="w-full border rounded px-2 py-1 font-bold bg-slate-100" readonly></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Cognome *</label><input type="text" id="editCognome" required class="w-full border rounded px-2 py-1 font-semibold"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Nome *</label><input type="text" id="editNome" required class="w-full border rounded px-2 py-1 font-semibold"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Suffisso Email</label><input type="text" id="editSuffisso" class="w-full border rounded px-2 py-1 font-semibold"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">MSP (CLAV) *</label><input type="text" id="editMSP" required class="w-full border rounded px-2 py-1 font-bold uppercase"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">C.d.L. *</label><input type="text" id="editCdL" required class="w-full border rounded px-2 py-1 font-bold uppercase"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Classe *</label><select id="editClasse" required class="w-full border rounded px-2 py-1 font-bold"><option value="O">O</option><option value="I">I</option><option value="Q">Q</option></select></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Distaccamento</label><input type="text" id="editDistaccamento" class="w-full border rounded px-2 py-1 font-semibold uppercase"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Pat</label><select id="editPat" class="w-full border rounded px-2 py-1 font-bold"><option value="">---</option><option value="A">A</option><option value="B">B</option><option value="C">C</option></select></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Turno/Rep</label><select id="editTurnoRep" class="w-full border rounded px-2 py-1 font-bold text-amber-800"><option value="">Nessuno</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Sede Lavoro</label><select id="editSedeLavoro" class="w-full border rounded px-2 py-1 font-semibold"><option value="RE">RE</option><option value="PC">PC</option><option value="PR">PR</option><option value="MO">MO</option><option value="BO">BO</option><option value="FE">FE</option><option value="RA">RA</option><option value="FC">FC</option><option value="RN">RN</option></select></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Residenza</label><input type="text" id="editResidenza" class="w-full border rounded px-2 py-1 font-semibold"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Cell. Lavoro</label><input type="text" id="editCellLavoro" class="w-full border rounded px-2 py-1 font-semibold"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Cell. Privato</label><input type="text" id="editCellPrivato" class="w-full border rounded px-2 py-1 font-semibold"></div>
+<div class="col-span-2"><label class="block font-bold text-slate-600 uppercase mb-1">E-mail</label><input type="email" id="editEmail" class="w-full border rounded px-2 py-1 font-semibold"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Ingresso MS</label><input type="text" id="editIngressoMS" class="w-full border rounded px-2 py-1 font-semibold"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Quiescenza</label><input type="text" id="editQuiescenza" class="w-full border rounded px-2 py-1 font-semibold"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Decorrenza Inq.</label><input type="text" id="editDecorrenzaInq" class="w-full border rounded px-2 py-1 font-semibold"></div>
+<div><label class="block font-bold text-slate-600 uppercase mb-1">Inq.</label><input type="text" id="editInq" class="w-full border rounded px-2 py-1 font-semibold"></div>
+<div class="col-span-2 md:col-span-4 flex justify-end gap-2 pt-2 border-t mt-2"><button type="button" onclick="chiudiModalModificaDip()" class="px-4 py-1.5 rounded text-xs font-semibold bg-slate-200 text-slate-700 hover:bg-slate-300">Annulla</button><button type="submit" class="px-4 py-1.5 rounded text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 shadow">Salva Modifiche</button></div>
+</form>
+</div>
 </div>
 
 <datalist id="datalistODM"></datalist>
@@ -521,7 +486,6 @@ window.startApp = function() {
     window.consuntivazioneData = JSON.parse(localStorage.getItem('team_consuntivazione_db')) || [];
     window.schemaNominativiRaw = JSON.parse(localStorage.getItem('team_schema_nominativi_db')) || null;
     
-    // ✅ CORREZIONE: aggiunte le chiamate mancanti
     if (typeof renderDipendenti === 'function') renderDipendenti();
     if (typeof popolaAnniIniziali === 'function') popolaAnniIniziali();
     if (typeof popolaSelettoreAnniSchema === 'function') popolaSelettoreAnniSchema();
@@ -533,10 +497,7 @@ window.startApp = function() {
     if (typeof aggiornaSchemaNominativi === 'function') aggiornaSchemaNominativi();
     if (typeof aggiornaIndicatoreSpazio === 'function') aggiornaIndicatoreSpazio();
     if (typeof aggiornaDatalistAutocompletamento === 'function') aggiornaDatalistAutocompletamento();
-    
-    // ✅ CORREZIONE: genera la tabella reperibilità con anno 2026
     if (typeof generaTabellaReperibilita === 'function') generaTabellaReperibilita(2026);
-    
     if (typeof cambiaTab === 'function') cambiaTab('calendario');
 };
 
@@ -715,7 +676,16 @@ function chiudiModalCopia(){document.getElementById('modalCopiaAttivita').classL
 function confermaCopiaAttivita(e){e.preventDefault();const attId=document.getElementById('copiaAttId').value;const nuovaData=document.getElementById('copiaNuovaData').value;const nuovoDip=document.getElementById('copiaNuovoDip').value;const eliminaOriginale=document.getElementById('copiaEliminaOriginale').checked;const attOriginale=attivitaCalendario.find(a=>a.id===attId);if(!attOriginale)return;const cidDestinatario=nuovoDip||attOriginale.cid;const nuovaAtt={id:Date.now().toString(),cid:cidDestinatario,data:nuovaData,tipo:attOriginale.tipo,odm:attOriginale.odm||'',desc:attOriginale.desc||'',ore:attOriginale.ore||0,min:attOriginale.min||0,op:attOriginale.op||'',oreNorm:attOriginale.oreNorm||0,minNorm:attOriginale.minNorm||0,oreSpec:attOriginale.oreSpec||0,minSpec:attOriginale.minSpec||0};const tipiAssenzaGiornata=['FE','RC','MA'];const attsGiornoDest=attivitaCalendario.filter(a=>a.cid===cidDestinatario&&a.data===nuovaData);if(tipiAssenzaGiornata.includes(nuovaAtt.tipo)&&attsGiornoDest.length>0){alert(`Impossibile copiare ${nuovaAtt.tipo}: il dipendente ha già attività in data ${nuovaData}.`);return;}if(attsGiornoDest.some(a=>tipiAssenzaGiornata.includes(a.tipo))){alert(`Impossibile copiare: il dipendente è già in assenza intera giornata (FE/RC/MA) in data ${nuovaData}.`);return;}attivitaCalendario.push(nuovaAtt);if(eliminaOriginale){attivitaCalendario=attivitaCalendario.filter(a=>a.id!==attId);}localStorage.setItem('team_attivita_db',JSON.stringify(attivitaCalendario));chiudiModalCopia();renderListaModal();aggiornaCalendario();aggiornaIndicatoreSpazio();aggiornaDatalistAutocompletamento();const msg=eliminaOriginale?'spostata':'copiata';alert(`✅ Attività ${msg} con successo!`);}
 function aggiornaDatalistAutocompletamento(){const odmUnici=[...new Set(attivitaCalendario.filter(a=>a.odm&&a.odm.trim()!=='').map(a=>a.odm))];const descUnici=[...new Set(attivitaCalendario.filter(a=>a.desc&&a.desc.trim()!=='').map(a=>a.desc))];const dlODM=document.getElementById('datalistODM');if(dlODM){dlODM.innerHTML=odmUnici.map(v=>`<option value="${v}">`).join('');}const dlDesc=document.getElementById('datalistDescrizione');if(dlDesc){dlDesc.innerHTML=descUnici.map(v=>`<option value="${v}">`).join('');}}
 function esportaDatabaseExcel(){const wb=XLSX.utils.book_new();const datiDip=[["CID","Cognome","Nome","Nominativo","Suffisso_Email","MSP","CdL","Classe","Distaccamento","Pat","TurnoRep","SedeLavoro","Residenza","CellLavoro","CellPrivato","Email","IngressoMS","Quiescenza","DecorrenzaInq","Inq"]];dipendenti.forEach(d=>datiDip.push([formattaCID(d.cid),d.cognome,d.nome,d.nominativo,d.suffisso_email,d.msp,d.cdL,d.classe,d.distaccamento,d.pat,d.turnoRep,d.sedeLavoro,d.residenza,d.cellLavoro,d.cellPrivato,d.email,d.ingressoMS,d.quiescenza,d.decorrenzaInq,d.inq]));XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiDip),"Dipendenti");const datiFest=[["ID","Nome","Giorno","Mese","Tipo","Sede"]];festivitaCustom.forEach(f=>datiFest.push([f.id,f.nome,f.giorno,f.mese,f.tipo,f.sede||'']));XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiFest),"Festivita");const datiAtt=[["ID","CID","Data","Tipo","OdM","Descrizione","Ore","Minuti","OP","OreNorm","MinNorm","OreSpec","MinSpec"]];attivitaCalendario.forEach(a=>datiAtt.push([a.id,formattaCID(a.cid),a.data,a.tipo,a.odm,a.desc,a.ore,a.min,a.op,a.oreNorm||0,a.minNorm||0,a.oreSpec||0,a.minSpec||0]));XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiAtt),"Attivita");const datiTurni=[["Anno","Settimana_ISO","Gruppo_Reperibilita"]];const anniOrdinati=Object.keys(MATRICE_REPERIBILITA).sort((a,b)=>a-b);anniOrdinati.forEach(anno=>{const sequenza=MATRICE_REPERIBILITA[anno];sequenza.forEach((gruppo,indexSettimana)=>{datiTurni.push([parseInt(anno),indexSettimana+1,gruppo]);});});XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiTurni),"Turni_Reperibilita");const datiCons=[["ID","CID","Data","ODM","OP","Ore","Min","OreNorm","MinNorm","OreSpec","MinSpec"]];consuntivazioneData.forEach(c=>datiCons.push([c.id,formattaCID(c.cid),c.data,c.odm,c.op,c.ore,c.min,c.oreNorm||0,c.minNorm||0,c.oreSpec||0,c.minSpec||0]));XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiCons),"Consuntivazione");XLSX.writeFile(wb,"Database_Completo_EM.xlsx");}
-function importaDatabaseExcel(e){const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=function(evt){try{const data=new Uint8Array(evt.target.result);const wb=XLSX.read(data,{type:'array'});if(wb.Sheets["Dipendenti"]){const jsonDip=XLSX.utils.sheet_to_json(wb.Sheets["Dipendenti"],{header:1}).slice(1);if(jsonDip.length>0){dipendenti=jsonDip.map(r=>({cid:formattaCID(String(r[0]||'')),cognome:String(r[1]||''),nome:String(r[2]||''),nominativo:String(r[3]||''),suffisso_email:String(r[4]||''),msp:String(r[5]||''),cdL:String(r[6]||''),classe:String(r[7]||''),distaccamento:String(r[8]||''),pat:String(r[9]||''),turnoRep:String(r[10]||''),sedeLavoro:String(r[11]||''),residenza:String(r[12]||''),cellLavoro:String(r[13]||''),cellPrivato:String(r[14]||''),email:String(r[15]||''),ingressoMS:formattaDataExcel(r[16]),quiescenza:formattaDataExcel(r[17]),decorrenzaInq:formattaDataExcel(r[18]),inq:String(r[19]||'')}));}}if(wb.Sheets["Festivita"]){const jsonFest=XLSX.utils.sheet_to_json(wb.Sheets["Festivita"],{header:1}).slice(1);if(jsonFest.length>0)festivitaCustom=jsonFest.map(r=>({id:String(r[0]||Date.now()),nome:String(r[1]||''),giorno:parseInt(r[2])||1,mese:parseInt(r[3])||0,tipo:String(r[4]||'PATRONO'),sede:String(r[5]||'')}));}if(wb.Sheets["Attivita"]){const jsonAtt=XLSX.utils.sheet_to_json(wb.Sheets["Attivita"],{header:1}).slice(1);if(jsonAtt.length>0)attivitaCalendario=jsonAtt.map(r=>({id:String(r[0]||Date.now()),cid:formattaCID(String(r[1]||'')),data:String(r[2]||''),tipo:String(r[3]||''),odm:String(r[4]||''),desc:String(r[5]||''),ore:parseInt(r[6])||0,min:parseInt(r[7])||0,op:String(r[8]||''),oreNorm:parseInt(r[9])||0,minNorm:parseInt(r[10])||0,oreSpec:parseInt(r[11])||0,minSpec:parseInt(r[12])||0}));}if(wb.Sheets["Turni_Reperibilita"]){const jsonTurni=XLSX.utils.sheet_to_json(wb.Sheets["Turni_Reperibilita"],{header:1}).slice(1);if(jsonTurni.length>0){MATRICE_REPERIBILITA={};jsonTurni.forEach(r=>{const anno=parseInt(r[0]);const settimana=parseInt(r[1]);const gruppo=parseInt(r[2]);if(anno&&settimana&&gruppo){if(!MATRICE_REPERIBILITA[anno])MATRICE_REPERIBILITA[anno]=[];MATRICE_REPERIBILITA[anno][settimana-1]=gruppo;}});}}else{MATRICE_REPERIBILITA=JSON.parse(JSON.stringify(MATRICE_REPERIBILITA_DEFAULT));}if(wb.Sheets["Consuntivazione"]){const jsonCons=XLSX.utils.sheet_to_json(wb.Sheets["Consuntivazione"],{header:1}).slice(1);if(jsonCons.length>0)consuntivazioneData=jsonCons.map(r=>({id:String(r[0]||Date.now()),cid:formattaCID(String(r[1]||'')),data:String(r[2]||''),odm:String(r[3]||''),op:String(r[4]||''),ore:parseInt(r[5])||0,min:parseInt(r[6])||0,oreNorm:parseInt(r[7])||0,minNorm:parseInt(r[8])||0,oreSpec:parseInt(r[9])||0,minSpec:parseInt(r[10])||0}));}renderDipendenti();popolaFiltroMSP();popolaFiltriConsuntivazione();renderFestivita();aggiornaCalendario();generaTabellaReperibilita(document.getElementById('annoSchemaReperibilita').value);popolaFiltroMSPSchemaNominativi();aggiornaSchemaNominativi();aggiornaIndicatoreSpazio();aggiornaDatalistAutocompletamento();alert("Database caricato con successo!");}catch(err){alert("Errore lettura Excel: "+err.message);}};reader.readAsArrayBuffer(file);e.target.value='';}
+function importaDatabaseExcel(e){const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=function(evt){try{const data=new Uint8Array(evt.target.result);const wb=XLSX.read(data,{type:'array'});if(wb.Sheets["Dipendenti"]){const jsonDip=XLSX.utils.sheet_to_json(wb.Sheets["Dipendenti"],{header:1}).slice(1);if(jsonDip.length>0){dipendenti=jsonDip.map(r=>({cid:formattaCID(String(r[0]||'')),cognome:String(r[1]||''),nome:String(r[2]||''),nominativo:String(r[3]||''),suffisso_email:String(r[4]||''),msp:String(r[5]||''),cdL:String(r[6]||''),classe:String(r[7]||''),distaccamento:String(r[8]||''),pat:String(r[9]||''),turnoRep:String(r[10]||''),sedeLavoro:String(r[11]||''),residenza:String(r[12]||''),cellLavoro:String(r[13]||''),cellPrivato:String(r[14]||''),email:String(r[15]||''),ingressoMS:formattaDataExcel(r[16]),quiescenza:formattaDataExcel(r[17]),decorrenzaInq:formattaDataExcel(r[18]),inq:String(r[19]||'')}));}}if(wb.Sheets["Festivita"]){const jsonFest=XLSX.utils.sheet_to_json(wb.Sheets["Festivita"],{header:1}).slice(1);if(jsonFest.length>0)festivitaCustom=jsonFest.map(r=>({id:String(r[0]||Date.now()),nome:String(r[1]||''),giorno:parseInt(r[2])||1,mese:parseInt(r[3])||0,tipo:String(r[4]||'PATRONO'),sede:String(r[5]||'')}));}if(wb.Sheets["Attivita"]){const jsonAtt=XLSX.utils.sheet_to_json(wb.Sheets["Attivita"],{header:1}).slice(1);if(jsonAtt.length>0)attivitaCalendario=jsonAtt.map(r=>({id:String(r[0]||Date.now()),cid:formattaCID(String(r[1]||'')),data:String(r[2]||''),tipo:String(r[3]||''),odm:String(r[4]||''),desc:String(r[5]||''),ore:parseInt(r[6])||0,min:parseInt(r[7])||0,op:String(r[8]||''),oreNorm:parseInt(r[9])||0,minNorm:parseInt(r[10])||0,oreSpec:parseInt(r[11])||0,minSpec:parseInt(r[12])||0}));}if(wb.Sheets["Turni_Reperibilita"]){const jsonTurni=XLSX.utils.sheet_to_json(wb.Sheets["Turni_Reperibilita"],{header:1}).slice(1);if(jsonTurni.length>0){MATRICE_REPERIBILITA={};jsonTurni.forEach(r=>{const anno=parseInt(r[0]);const settimana=parseInt(r[1]);const gruppo=parseInt(r[2]);if(anno&&settimana&&gruppo){if(!MATRICE_REPERIBILITA[anno])MATRICE_REPERIBILITA[anno]=[];MATRICE_REPERIBILITA[anno][settimana-1]=gruppo;}});}}else{MATRICE_REPERIBILITA=JSON.parse(JSON.stringify(MATRICE_REPERIBILITA_DEFAULT));}if(wb.Sheets["Consuntivazione"]){const jsonCons=XLSX.utils.sheet_to_json(wb.Sheets["Consuntivazione"],{header:1}).slice(1);if(jsonCons.length>0)consuntivazioneData=jsonCons.map(r=>({id:String(r[0]||Date.now()),cid:formattaCID(String(r[1]||'')),data:String(r[2]||''),odm:String(r[3]||''),op:String(r[4]||''),ore:parseInt(r[5])||0,min:parseInt(r[6])||0,oreNorm:parseInt(r[7])||0,minNorm:parseInt(r[8])||0,oreSpec:parseInt(r[9])||0,minSpec:parseInt(r[10])||0}));}
+// ✅ FIX: SALVATAGGIO FORZATO IN LOCALSTORAGE (così i dati persistono dopo logout)
+localStorage.setItem('team_dipendenti_db', JSON.stringify(dipendenti));
+localStorage.setItem('team_festivita_db', JSON.stringify(festivitaCustom));
+localStorage.setItem('team_attivita_db', JSON.stringify(attivitaCalendario));
+localStorage.setItem('team_consuntivazione_db', JSON.stringify(consuntivazioneData));
+localStorage.setItem('team_schema_nominativi_db', JSON.stringify(schemaNominativi));
+localStorage.setItem('team_matrice_reperibilita_db', JSON.stringify(MATRICE_REPERIBILITA));
+
+renderDipendenti();popolaFiltroMSP();popolaFiltriConsuntivazione();renderFestivita();aggiornaCalendario();generaTabellaReperibilita(document.getElementById('annoSchemaReperibilita').value);popolaFiltroMSPSchemaNominativi();aggiornaSchemaNominativi();aggiornaIndicatoreSpazio();aggiornaDatalistAutocompletamento();alert("Database caricato con successo!");}catch(err){alert("Errore lettura Excel: "+err.message);}};reader.readAsArrayBuffer(file);e.target.value='';}
 </script>
 </body>
 </html>

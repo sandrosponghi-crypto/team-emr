@@ -11,9 +11,6 @@
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 <script>
-// ============================================================
-// CONFIGURAZIONE FIREBASE - LOGICA CORRETTA
-// ============================================================
 const firebaseConfig = {
     apiKey: "AIzaSyD2ljiuHzljb6-YSQHAYExb9m6TYlNVJpo",
     authDomain: "team-emr-177d7.firebaseapp.com",
@@ -27,20 +24,15 @@ window.db = firebase.firestore();
 window.auth = firebase.auth();
 
 const FB_KEYS = ['team_dipendenti_db','team_festivita_db','team_attivita_db','team_consuntivazione_db','team_schema_nominativi_db','team_matrice_reperibilita_db'];
+window._listenersRegistered = false;
 
-// ✅ FIX CRITICO: NON intercettare localStorage.setItem
-// Usiamo invece una funzione esplicita per scrivere su Firebase
-window._firebaseReady = false;
-window._firebaseDataLoaded = false;
-
-// Funzione per scrivere SOLO su Firebase (chiamata esplicitamente quando l'utente modifica dati)
 window.syncToFirebase = function(key, data) {
-    if (!FB_KEYS.includes(key) || !window.db || !window._firebaseReady) return;
+    if (!FB_KEYS.includes(key) || !window.db || !window.auth.currentUser) return;
     try {
         window.db.collection('sync').doc(key).set({
             data: data,
             ts: Date.now(),
-            user: window.auth.currentUser?.email || 'unknown'
+            user: window.auth.currentUser.email
         }, { merge: true }).then(() => {
             console.log('✅ Scritto su Firebase:', key);
         }).catch(e => {
@@ -51,55 +43,56 @@ window.syncToFirebase = function(key, data) {
     }
 };
 
-// Listener: quando Firebase cambia, aggiorna localStorage e variabili
-FB_KEYS.forEach(key => {
-    window.db.collection('sync').doc(key).onSnapshot(doc => {
-        if (doc.exists) {
-            const cloudData = doc.data().data;
-            const cloudDataStr = JSON.stringify(cloudData);
-            const localDataStr = localStorage.getItem(key);
-            
-            if (localDataStr !== cloudDataStr) {
-                console.log('📥 Aggiornato da Firebase:', key);
-                localStorage.setItem(key, cloudDataStr);
+function registerFirebaseListeners() {
+    if (window._listenersRegistered) return;
+    window._listenersRegistered = true;
+    
+    FB_KEYS.forEach(key => {
+        window.db.collection('sync').doc(key).onSnapshot(doc => {
+            if (doc.exists) {
+                const cloudData = doc.data().data;
+                const cloudDataStr = JSON.stringify(cloudData);
+                const localDataStr = localStorage.getItem(key);
                 
-                // Aggiorna variabili globali
-                if (key === 'team_dipendenti_db') window.dipendenti = cloudData;
-                if (key === 'team_festivita_db') window.festivitaCustom = cloudData;
-                if (key === 'team_attivita_db') window.attivitaCalendario = cloudData;
-                if (key === 'team_consuntivazione_db') window.consuntivazioneData = cloudData;
-                if (key === 'team_schema_nominativi_db') {
-                    window.schemaNominativiRaw = cloudData;
-                    if (cloudData && !cloudData['EEMM2'] && cloudData.tecnici) {
-                        window.schemaNominativi = {'EEMM2': {tecnici: cloudData.tecnici || [], operativi: cloudData.operativi || []}};
-                    } else if (cloudData) {
-                        window.schemaNominativi = cloudData;
+                if (localDataStr !== cloudDataStr) {
+                    console.log('📥 Aggiornato da Firebase:', key);
+                    localStorage.setItem(key, cloudDataStr);
+                    
+                    if (key === 'team_dipendenti_db') window.dipendenti = cloudData;
+                    if (key === 'team_festivita_db') window.festivitaCustom = cloudData;
+                    if (key === 'team_attivita_db') window.attivitaCalendario = cloudData;
+                    if (key === 'team_consuntivazione_db') window.consuntivazioneData = cloudData;
+                    if (key === 'team_schema_nominativi_db') {
+                        window.schemaNominativiRaw = cloudData;
+                        if (cloudData && !cloudData['EEMM2'] && cloudData.tecnici) {
+                            window.schemaNominativi = {'EEMM2': {tecnici: cloudData.tecnici || [], operativi: cloudData.operativi || []}};
+                        } else if (cloudData) {
+                            window.schemaNominativi = cloudData;
+                        }
                     }
+                    if (key === 'team_matrice_reperibilita_db') window.MATRICE_REPERIBILITA = cloudData;
+                    
+                    if (typeof renderDipendenti === 'function') renderDipendenti();
+                    if (typeof renderFestivita === 'function') renderFestivita();
+                    if (typeof aggiornaCalendario === 'function') aggiornaCalendario();
+                    if (typeof aggiornaSchemaNominativi === 'function') aggiornaSchemaNominativi();
+                    if (typeof generaTabellaReperibilita === 'function') generaTabellaReperibilita(2026);
                 }
-                if (key === 'team_matrice_reperibilita_db') window.MATRICE_REPERIBILITA = cloudData;
-                
-                // Aggiorna UI
-                if (typeof renderDipendenti === 'function') renderDipendenti();
-                if (typeof renderFestivita === 'function') renderFestivita();
-                if (typeof aggiornaCalendario === 'function') aggiornaCalendario();
-                if (typeof aggiornaSchemaNominativi === 'function') aggiornaSchemaNominativi();
-                if (typeof generaTabellaReperibilita === 'function') generaTabellaReperibilita(2026);
             }
-        }
+        });
     });
-});
+}
 
-// Login
 window.doLogin = function() {
     const email = document.getElementById('loginEmail').value;
     const pass = document.getElementById('loginPassword').value;
     const errEl = document.getElementById('loginError');
+    
     window.auth.signInWithEmailAndPassword(email, pass)
         .then(() => {
             document.getElementById('loginOverlay').style.display = 'none';
             document.getElementById('appContainer').style.display = 'block';
             document.getElementById('userInfo').textContent = email;
-            if(window.startApp) window.startApp();
         })
         .catch((error) => {
             errEl.textContent = "Errore: " + (error.message.includes('auth/') ? 'Email o password errati.' : error.message);
@@ -109,18 +102,49 @@ window.doLogin = function() {
 
 window.doLogout = function() { window.auth.signOut().then(() => location.reload()); };
 
-window.auth.onAuthStateChanged(user => {
+window.auth.onAuthStateChanged(async user => {
     if (user) {
         document.getElementById('loginOverlay').style.display = 'none';
         document.getElementById('appContainer').style.display = 'block';
         document.getElementById('userInfo').textContent = user.email;
-        window._firebaseReady = true;
+        
+        console.log('🚀 Utente loggato:', user.email);
+        
+        registerFirebaseListeners();
+        
+        try {
+            const promises = FB_KEYS.map(key => 
+                window.db.collection('sync').doc(key).get()
+            );
+            const docs = await Promise.all(promises);
+            
+            let firebaseHasData = false;
+            docs.forEach((doc, idx) => {
+                const key = FB_KEYS[idx];
+                if (doc.exists && doc.data().data) {
+                    const data = doc.data().data;
+                    localStorage.setItem(key, JSON.stringify(data));
+                    firebaseHasData = true;
+                    console.log('📥 Caricato da Firebase:', key);
+                }
+            });
+            
+            if (firebaseHasData) {
+                console.log('✅ Dati caricati da Firebase');
+            } else {
+                console.log('⚠️ Firebase vuoto, uso dati locali o default');
+            }
+        } catch(e) {
+            console.error('❌ Errore lettura Firebase:', e);
+        }
+        
         if(window.startApp) window.startApp();
+        
     } else {
         document.getElementById('loginOverlay').style.display = 'flex';
         document.getElementById('appContainer').style.display = 'none';
-        window._firebaseReady = false;
-        window._firebaseDataLoaded = false;
+        document.getElementById('userInfo').textContent = '';
+        window._listenersRegistered = false;
     }
 });
 </script>
@@ -394,9 +418,6 @@ window.auth.onAuthStateChanged(user => {
 <datalist id="datalistDescrizione"></datalist>
 
 <script>
-// ============================================================
-// DATI DI DEFAULT
-// ============================================================
 const MINUTI_GIORNATA_STANDARD=456,MAX_MINUTI_RF=456;
 const MATRICE_REPERIBILITA_DEFAULT={2016:[1,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2],2017:[2,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3],2018:[3,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4],2019:[4,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1],2020:[1,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2],2021:[2,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,3],2022:[1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4],2023:[2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1],2024:[3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2],2025:[3,4,1,2,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3],2026:[4,1,2,3,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1],2027:[2,3,4,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2],2028:[3,4,1,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3],2029:[4,1,2,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4],2030:[1,2,3,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1],2031:[2,3,4,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2],2032:[3,4,1,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4],2033:[1,2,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1],2034:[2,3,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2],2035:[3,4,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3],2036:[4,1,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4],2037:[1,2,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2],2038:[3,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3],2039:[4,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4],2040:[1,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1]};
 const DIPENDENTI_DEFAULT=[{cid:'00256247',nome:'Emanuele',cognome:'Bongiorni',nominativo:'BONGIORNI EMANUELE',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'B',turnoRep:'3',sedeLavoro:'PC',residenza:'Rottofreno (PC)',cellLavoro:'329 430 6107',cellPrivato:'347 535 8931',email:'emanuele.bongiorni@e-distribuzione.com',msp:'EEMM2',ingressoMS:'',quiescenza:'---',decorrenzaInq:'01/12/2023',inq:'A1'},{cid:'00454542',nome:'Francesco',cognome:'Cavallotti',nominativo:'CAVALLOTTI FRANCESCO',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'C',turnoRep:'3',sedeLavoro:'PC',residenza:'Casaliggio (PC)',cellLavoro:'324 880 7673',cellPrivato:'329 963 4812',email:'francesco.cavallotti@e-distribuzione.com',msp:'EEMM2',ingressoMS:'01/01/2023',quiescenza:'---',decorrenzaInq:'',inq:'B1S'},{cid:'00250970',nome:'Mattia',cognome:'Bisi',nominativo:'BISI MATTIA',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'C',turnoRep:'4',sedeLavoro:'RE',residenza:'Fabbrico (RE)',cellLavoro:'320 019 7953',cellPrivato:'347 108 6991',email:'mattia.bisi@e-distribuzione.com',msp:'EEMM2',ingressoMS:'',quiescenza:'---',decorrenzaInq:'01/03/2022',inq:'---'},{cid:'00452743',nome:'Antonino',cognome:'Cannata',nominativo:'CANNATA ANTONINO',suffisso_email:'2',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'B',turnoRep:'1',sedeLavoro:'RE',residenza:'Correggio (RE)',cellLavoro:'380 741 2464',cellPrivato:'329 131 5471',email:'antonino.cannata2@e-distribuzione.com',msp:'EEMM2',ingressoMS:'',quiescenza:'---',decorrenzaInq:'01/05/2022',inq:'---'},{cid:'00249071',nome:'Marco',cognome:'Fanti',nominativo:'FANTI MARCO',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'B',turnoRep:'4',sedeLavoro:'RE',residenza:'Reggio Emilia (RE)',cellLavoro:'329 430 6355',cellPrivato:'---',email:'marco.fanti@e-distribuzione.com',msp:'EEMM2',ingressoMS:'',quiescenza:'---',decorrenzaInq:'01/12/2019',inq:'---'},{cid:'00427128',nome:'Andrea',cognome:'Fedolfi',nominativo:'FEDOLFI ANDREA',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'B',turnoRep:'2',sedeLavoro:'RE',residenza:'Bibbiano (RE)',cellLavoro:'329 430 6350',cellPrivato:'347 984 2316',email:'andrea.fedolfi@e-distribuzione.com',msp:'EEMM2',ingressoMS:'',quiescenza:'---',decorrenzaInq:'01/12/2016',inq:'---'},{cid:'00255747',nome:'Cristian',cognome:'Magnani',nominativo:'MAGNANI CRISTIAN',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'C',turnoRep:'2',sedeLavoro:'RE',residenza:'Poviglio (RE)',cellLavoro:'329 430 5952',cellPrivato:'331 110 2183',email:'cristian.magnani@e-distribuzione.com',msp:'EEMM2',ingressoMS:'',quiescenza:'---',decorrenzaInq:'01/10/2022',inq:'---'},{cid:'00256676',nome:'Marco',cognome:'Scrivani',nominativo:'SCRIVANI MARCO',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'C',turnoRep:'3',sedeLavoro:'PC',residenza:'Podenzano (PC)',cellLavoro:'329 240 5995',cellPrivato:'328 679 6654',email:'marco.scrivani@e-distribuzione.com',msp:'EEMM2',ingressoMS:'01/07/2026',quiescenza:'---',decorrenzaInq:'',inq:''},{cid:'00256244',nome:'Marco',cognome:'Orsini',nominativo:'ORSINI MARCO',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'C',turnoRep:'4',sedeLavoro:'RE',residenza:'Cittanova (MO)',cellLavoro:'329 240 6094',cellPrivato:'---',email:'marco.orsini@e-distribuzione.com',msp:'EEMM2',ingressoMS:'01/03/2023',quiescenza:'---',decorrenzaInq:'',inq:'BSS'},{cid:'00426853',nome:'Sandro',cognome:'Sponghi',nominativo:'SPONGHI SANDRO',suffisso_email:'',cdL:'EEMM2-2I',classe:'Q',distaccamento:'MS-RE',pat:'C',turnoRep:'3',sedeLavoro:'RE',residenza:'Valsamoggia (BO)',cellLavoro:'329 430 6267',cellPrivato:'334 713 7360',email:'sandro.sponghi@e-distribuzione.com',msp:'EEMM2',ingressoMS:'01/09/1994',quiescenza:'---',decorrenzaInq:'01/12/2020',inq:'---'},{cid:'00256375',nome:'Davide',cognome:'Vacondio',nominativo:'VACONDIO DAVIDE',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'B',turnoRep:'1',sedeLavoro:'RE',residenza:'Gavasseto (RE)',cellLavoro:'329 430 6353',cellPrivato:'349 536 5258',email:'davide.vacondio@e-distribuzione.com',msp:'EEMM2',ingressoMS:'',quiescenza:'---',decorrenzaInq:'',inq:'---'},{cid:'00435117',nome:'Marco',cognome:'Valentini',nominativo:'VALENTINI MARCO',suffisso_email:'2',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'B',turnoRep:'2',sedeLavoro:'RE',residenza:'Albinea (RE)',cellLavoro:'320 113 4578',cellPrivato:'346 412 3142',email:'marco.valentini2@e-distribuzione.com',msp:'EEMM2',ingressoMS:'',quiescenza:'---',decorrenzaInq:'',inq:'---'}];
@@ -417,40 +438,10 @@ let festInModifica=null;
 let modalitaCID=null;
 let modalitaData=null;
 let modalitaModifica=false;
-let firebaseInitialized=false;
 
-// ✅ FIX CRITICO: startApp che legge da Firebase PRIMA di inizializzare
-window.startApp = async function() {
+window.startApp = function() {
     console.log('🚀 Avvio app...');
     
-    // 1. Prova a leggere da Firebase
-    try {
-        const promises = FB_KEYS.map(key => 
-            window.db.collection('sync').doc(key).get()
-        );
-        const docs = await Promise.all(promises);
-        
-        let firebaseHasData = false;
-        docs.forEach((doc, idx) => {
-            const key = FB_KEYS[idx];
-            if (doc.exists && doc.data().data) {
-                const data = doc.data().data;
-                localStorage.setItem(key, JSON.stringify(data));
-                firebaseHasData = true;
-                console.log('📥 Caricato da Firebase:', key);
-            }
-        });
-        
-        if (firebaseHasData) {
-            console.log('✅ Dati caricati da Firebase');
-        } else {
-            console.log('⚠️ Firebase vuoto, uso dati locali o default');
-        }
-    } catch(e) {
-        console.error('❌ Errore lettura Firebase:', e);
-    }
-    
-    // 2. Carica da localStorage (ora contiene dati Firebase se disponibili)
     window.dipendenti = JSON.parse(localStorage.getItem('team_dipendenti_db')) || DIPENDENTI_DEFAULT;
     window.festivitaCustom = JSON.parse(localStorage.getItem('team_festivita_db')) || FESTIVITA_PREDEFINITE;
     window.attivitaCalendario = JSON.parse(localStorage.getItem('team_attivita_db')) || [];
@@ -458,7 +449,6 @@ window.startApp = async function() {
     window.schemaNominativiRaw = JSON.parse(localStorage.getItem('team_schema_nominativi_db')) || null;
     window.MATRICE_REPERIBILITA = JSON.parse(localStorage.getItem('team_matrice_reperibilita_db')) || JSON.parse(JSON.stringify(MATRICE_REPERIBILITA_DEFAULT));
     
-    // 3. Inizializza schemaNominativi
     if (schemaNominativiRaw && !schemaNominativiRaw['EEMM2'] && schemaNominativiRaw.tecnici) {
         schemaNominativi['EEMM2'] = { tecnici: schemaNominativiRaw.tecnici || [], operativi: schemaNominativiRaw.operativi || [] };
     } else if (schemaNominativiRaw) {
@@ -470,23 +460,20 @@ window.startApp = async function() {
         };
     }
     
-    // 4. Inizializza UI
     if (typeof popolaAnniIniziali === 'function') popolaAnniIniziali();
     if (typeof popolaSelettoreAnniSchema === 'function') popolaSelettoreAnniSchema();
     if (typeof popolaFiltroMSP === 'function') popolaFiltroMSP();
     if (typeof popolaFiltroMSPSchemaNominativi === 'function') popolaFiltroMSPSchemaNominativi();
     if (typeof popolaFiltriReport === 'function') popolaFiltriReport();
     if (typeof popolaFiltriConsuntivazione === 'function') popolaFiltriConsuntivazione();
-    if (typeof renderFestivita === 'function') renderFestivita();
-    if (typeof aggiornaSchemaNominativi === 'function') aggiornaSchemaNominativi();
     if (typeof aggiornaIndicatoreSpazio === 'function') aggiornaIndicatoreSpazio();
     if (typeof aggiornaDatalistAutocompletamento === 'function') aggiornaDatalistAutocompletamento();
     if (typeof generaTabellaReperibilita === 'function') generaTabellaReperibilita(2026);
     if (typeof renderDipendenti === 'function') renderDipendenti();
+    if (typeof renderFestivita === 'function') renderFestivita();
     if (typeof aggiornaCalendario === 'function') aggiornaCalendario();
+    if (typeof aggiornaSchemaNominativi === 'function') aggiornaSchemaNominativi();
     if (typeof cambiaTab === 'function') cambiaTab('calendario');
-    
-    firebaseInitialized = true;
 };
 
 function formattaCID(cid){if(!cid||cid.trim()==='')return'';return String(cid).trim().padStart(8,'0');}
@@ -615,7 +602,6 @@ localStorage.setItem('team_attivita_db',JSON.stringify(attivitaCalendario));
 localStorage.setItem('team_consuntivazione_db',JSON.stringify(consuntivazioneData));
 localStorage.setItem('team_schema_nominativi_db',JSON.stringify(schemaNominativi));
 localStorage.setItem('team_matrice_reperibilita_db',JSON.stringify(MATRICE_REPERIBILITA));
-// ✅ FIX CRITICO: Scrivi su Firebase DOPO aver salvato in localStorage
 window.syncToFirebase('team_dipendenti_db',dipendenti);
 window.syncToFirebase('team_festivita_db',festivitaCustom);
 window.syncToFirebase('team_attivita_db',attivitaCalendario);

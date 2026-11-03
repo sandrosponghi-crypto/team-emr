@@ -11,71 +11,119 @@
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 <script>
-const firebaseConfig={apiKey:"AIzaSyD2ljiuHzljb6-YSQHAYExb9m6TYlNVJpo",authDomain:"team-emr-177d7.firebaseapp.com",projectId:"team-emr-177d7",storageBucket:"team-emr-177d7.firebasestorage.app",messagingSenderId:"56130127207",appId:"1:56130127207:web:e1aaf1d0542f5c56915bc2"};
+// ============================================================
+// CONFIGURAZIONE FIREBASE
+// ============================================================
+const firebaseConfig = {
+    apiKey: "AIzaSyD2ljiuHzljb6-YSQHAYExb9m6TYlNVJpo",
+    authDomain: "team-emr-177d7.firebaseapp.com",
+    projectId: "team-emr-177d7",
+    storageBucket: "team-emr-177d7.firebasestorage.app",
+    messagingSenderId: "56130127207",
+    appId: "1:56130127207:web:e1aaf1d0542f5c56915bc2"
+};
 firebase.initializeApp(firebaseConfig);
-window.db=firebase.firestore();
-window.auth=firebase.auth();
-const FB_KEYS=['team_dipendenti_db','team_festivita_db','team_attivita_db','team_consuntivazione_db','team_schema_nominativi_db','team_matrice_reperibilita_db'];
-const originalSetItem=localStorage.setItem;
-localStorage.setItem=function(key,value){
-    originalSetItem.call(localStorage,key,value);
-    if(FB_KEYS.includes(key)&&window.db){
-        try{
-            const data=JSON.parse(value);
-            window.db.collection('sync').doc(key).set({data:data,ts:Date.now(),user:window.auth.currentUser?.email||'unknown'},{merge:true}).catch(e=>{});
-        }catch(e){}
+window.db = firebase.firestore();
+window.auth = firebase.auth();
+
+const FB_KEYS = ['team_dipendenti_db','team_festivita_db','team_attivita_db','team_consuntivazione_db','team_schema_nominativi_db','team_matrice_reperibilita_db'];
+const originalSetItem = localStorage.setItem;
+
+// Flag per evitare loop durante scritture locali
+window._isWriting = false;
+
+// ✅ FIX CRITICO: Intercettazione localStorage con scrittura SU FIREBASE
+localStorage.setItem = function(key, value) {
+    originalSetItem.call(localStorage, key, value);
+    if (FB_KEYS.includes(key) && window.db && !window._skipFirebaseWrite) {
+        try {
+            const data = JSON.parse(value);
+            window.db.collection('sync').doc(key).set({ 
+                data: data, 
+                ts: Date.now(),
+                user: window.auth.currentUser?.email || 'unknown'
+            }, { merge: true }).then(() => {
+                console.log('✅ Scritto su Firebase:', key);
+            }).catch(e => {
+                console.error('❌ Errore Firebase:', key, e);
+            });
+        } catch(e) {
+            console.error('❌ Errore parsing JSON:', key, e);
+        }
     }
 };
-window._isWriting=false;
-FB_KEYS.forEach(key=>{
-    window.db.collection('sync').doc(key).onSnapshot(doc=>{
-        if(doc.exists&&!window._isWriting){
-            const cloudData=doc.data().data;
-            const cloudDataStr=JSON.stringify(cloudData);
-            if(localStorage.getItem(key)!==cloudDataStr){
-                originalSetItem.call(localStorage,key,cloudDataStr);
-                if(key==='team_dipendenti_db')window.dipendenti=cloudData;
-                if(key==='team_festivita_db')window.festivitaCustom=cloudData;
-                if(key==='team_attivita_db')window.attivitaCalendario=cloudData;
-                if(key==='team_consuntivazione_db')window.consuntivazioneData=cloudData;
-                if(key==='team_schema_nominativi_db'){
-                    window.schemaNominativiRaw=cloudData;
-                    if(cloudData&&!cloudData['EEMM2']&&cloudData.tecnici){window.schemaNominativi={'EEMM2':{tecnici:cloudData.tecnici||[],operativi:cloudData.operativi||[]}};}
-                    else if(cloudData){window.schemaNominativi=cloudData;}
+
+// ✅ FIX CRITICO: Listener onSnapshot che NON sovrascrive con dati vuoti
+FB_KEYS.forEach(key => {
+    window.db.collection('sync').doc(key).onSnapshot(doc => {
+        if (doc.exists && !window._isWriting) {
+            const cloudData = doc.data().data;
+            const cloudDataStr = JSON.stringify(cloudData);
+            const localDataStr = localStorage.getItem(key);
+            
+            // Solo se i dati cloud sono diversi e NON vuoti
+            if (localDataStr !== cloudDataStr && cloudData && 
+                (Array.isArray(cloudData) ? cloudData.length > 0 : Object.keys(cloudData).length > 0)) {
+                
+                console.log('📥 Caricato da Firebase:', key, cloudData);
+                originalSetItem.call(localStorage, key, cloudDataStr);
+                
+                // Aggiorna variabili globali
+                if (key === 'team_dipendenti_db') window.dipendenti = cloudData;
+                if (key === 'team_festivita_db') window.festivitaCustom = cloudData;
+                if (key === 'team_attivita_db') window.attivitaCalendario = cloudData;
+                if (key === 'team_consuntivazione_db') window.consuntivazioneData = cloudData;
+                if (key === 'team_schema_nominativi_db') {
+                    window.schemaNominativiRaw = cloudData;
                 }
-                if(typeof renderDipendenti==='function')renderDipendenti();
-                if(typeof renderFestivita==='function')renderFestivita();
-                if(typeof aggiornaCalendario==='function')aggiornaCalendario();
-                if(typeof aggiornaSchemaNominativi==='function')aggiornaSchemaNominativi();
+                if (key === 'team_matrice_reperibilita_db') {
+                    window.MATRICE_REPERIBILITA = cloudData;
+                }
+                
+                // Aggiorna UI
+                if (typeof renderDipendenti === 'function') renderDipendenti();
+                if (typeof renderFestivita === 'function') renderFestivita();
+                if (typeof aggiornaCalendario === 'function') aggiornaCalendario();
+                if (typeof aggiornaSchemaNominativi === 'function') aggiornaSchemaNominativi();
+                if (typeof generaTabellaReperibilita === 'function') generaTabellaReperibilita(2026);
             }
         }
     });
 });
-window.doLogin=function(){
-    const email=document.getElementById('loginEmail').value;
-    const pass=document.getElementById('loginPassword').value;
-    const errEl=document.getElementById('loginError');
-    window.auth.signInWithEmailAndPassword(email,pass).then(()=>{
-        document.getElementById('loginOverlay').style.display='none';
-        document.getElementById('appContainer').style.display='block';
-        document.getElementById('userInfo').textContent=email;
-        if(window.startApp)window.startApp();
-    }).catch((error)=>{
-        errEl.textContent="Errore: "+(error.message.includes('auth/')?'Email o password errati.':error.message);
-        errEl.style.display='block';
-    });
+
+// Login
+window.doLogin = function() {
+    const email = document.getElementById('loginEmail').value;
+    const pass = document.getElementById('loginPassword').value;
+    const errEl = document.getElementById('loginError');
+    
+    window.auth.signInWithEmailAndPassword(email, pass)
+        .then(() => {
+            document.getElementById('loginOverlay').style.display = 'none';
+            document.getElementById('appContainer').style.display = 'block';
+            document.getElementById('userInfo').textContent = email;
+            if(window.startApp) window.startApp();
+        })
+        .catch((error) => {
+            errEl.textContent = "Errore: " + (error.message.includes('auth/') ? 'Email o password errati.' : error.message);
+            errEl.style.display = 'block';
+        });
 };
-window.doLogout=function(){window.auth.signOut().then(()=>location.reload());};
-window.auth.onAuthStateChanged(user=>{
-    if(user){
-        document.getElementById('loginOverlay').style.display='none';
-        document.getElementById('appContainer').style.display='block';
-        document.getElementById('userInfo').textContent=user.email;
-        if(window.startApp)window.startApp();
-    }else{
-        document.getElementById('loginOverlay').style.display='flex';
-        document.getElementById('appContainer').style.display='none';
-        document.getElementById('userInfo').textContent='';
+
+// Logout
+window.doLogout = function() { window.auth.signOut().then(() => location.reload()); };
+
+// Controllo stato login
+window.auth.onAuthStateChanged(user => {
+    if (user) {
+        document.getElementById('loginOverlay').style.display = 'none';
+        document.getElementById('appContainer').style.display = 'block';
+        document.getElementById('userInfo').textContent = user.email;
+        if(window.startApp) window.startApp();
+    } else {
+        document.getElementById('loginOverlay').style.display = 'flex';
+        document.getElementById('appContainer').style.display = 'none';
+        document.getElementById('userInfo').textContent = '';
     }
 });
 </script>
@@ -181,7 +229,9 @@ window.auth.onAuthStateChanged(user=>{
 </style>
 </head>
 <body class="bg-slate-50 min-h-screen text-slate-800 font-sans pb-12">
+
 <div id="loginOverlay"><div class="login-box"><i class="fa-solid fa-users-gear text-amber-500 text-4xl mb-4"></i><h2 class="text-2xl font-bold text-slate-800 mb-2">Gestione Team EMR</h2><p class="text-slate-500 text-sm mb-6">Inserisci le credenziali per accedere</p><input type="email" id="loginEmail" placeholder="Email" class="w-full p-3 mb-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"><input type="password" id="loginPassword" placeholder="Password" class="w-full p-3 mb-4 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" onkeypress="if(event.key==='Enter') window.doLogin()"><button onclick="window.doLogin()" class="w-full p-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition">Accedi</button><p id="loginError" class="text-red-600 text-sm mt-3 hidden"></p></div></div>
+
 <div id="appContainer" style="display:none;">
 <header class="bg-slate-950 text-white shadow-lg sticky top-0 z-50 border-b border-slate-800">
 <div class="max-w-7xl mx-auto px-4 py-3 flex flex-col md:flex-row justify-between items-center gap-3">
@@ -198,7 +248,9 @@ window.auth.onAuthStateChanged(user=>{
 </nav>
 </div>
 </header>
+
 <main class="max-w-[95vw] mx-auto px-4 mt-6 space-y-6">
+
 <section id="sezione-calendario" class="tab-contenuto space-y-6">
 <div class="bg-white rounded-xl shadow-md p-5 border border-slate-200">
 <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-5 border-b pb-4">
@@ -227,6 +279,7 @@ window.auth.onAuthStateChanged(user=>{
 <div class="overflow-x-auto"><div id="contenitoreGrigliaCalendario" class="min-w-[1200px]"></div></div>
 </div>
 </section>
+
 <section id="sezione-anagrafica" class="tab-contenuto hidden space-y-6">
 <div class="bg-white rounded-xl shadow-md p-5 border border-slate-200">
 <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 border-b pb-3"><div><h2 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-id-card text-blue-600"></i> Gestione Anagrafica Risorse & Turni</h2><p class="text-xs text-slate-500">Mappatura completa CID, Sede, CLAV, Contatti e Gruppo Reperibilità.</p></div></div>
@@ -255,6 +308,7 @@ window.auth.onAuthStateChanged(user=>{
 <div class="overflow-x-auto border border-slate-200 rounded-lg"><table class="w-full text-left border-collapse text-[11px] whitespace-nowrap"><thead><tr class="bg-slate-800 text-white uppercase font-bold"><th class="p-2 border-r border-slate-700">CID</th><th class="p-2 border-r border-slate-700">Cognome e Nome</th><th class="p-2 border-r border-slate-700">MSP</th><th class="p-2 border-r border-slate-700">C.d.L.</th><th class="p-2 border-r border-slate-700">Cl.</th><th class="p-2 border-r border-slate-700">Dist.</th><th class="p-2 border-r border-slate-700">Pat</th><th class="p-2 border-r border-slate-700">Rep</th><th class="p-2 border-r border-slate-700">Sede</th><th class="p-2 border-r border-slate-700">Residenza</th><th class="p-2 border-r border-slate-700">Cell. Lavoro</th><th class="p-2 border-r border-slate-700">E-mail</th><th class="p-2 border-r border-slate-700">Ingresso MS</th><th class="p-2 border-r border-slate-700">Decorr. Inq.</th><th class="p-2 border-r border-slate-700">Inq.</th><th class="p-2 text-center">Azione</th></tr></thead><tbody id="tabellaDipendenti" class="divide-y divide-slate-200 bg-white"></tbody></table></div>
 </div>
 </section>
+
 <section id="sezione-consuntivazione" class="tab-contenuto hidden space-y-6">
 <div class="bg-white rounded-xl shadow-md p-5 border border-slate-200">
 <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 border-b pb-3"><div><h2 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-chart-pie text-emerald-600"></i> Consuntivazione CAPEX - Capitalizzazione</h2><p class="text-xs text-slate-500">Consuntivazione per C.D.L. omogeneo. Operativi (CL=O) esclusi. Quadri (CL=Q) separati.</p></div></div>
@@ -272,6 +326,7 @@ window.auth.onAuthStateChanged(user=>{
 <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 mt-6"><h3 class="font-bold text-amber-900 text-sm mb-2 flex items-center gap-2"><i class="fa-solid fa-box-archive"></i> Archiviazione Anno Chiuso</h3><p class="text-xs text-amber-800 mb-3">Esporta i dati di un anno specifico in un file Excel separato e rimuovili dal database corrente.</p><div class="flex flex-wrap gap-3 items-end"><div><label class="block text-[11px] font-bold text-amber-800 uppercase mb-1">Anno da Archiviare</label><select id="archivioAnno" class="border rounded px-2 py-1 text-xs font-bold bg-white"></select></div><button type="button" onclick="archiviaAnno()" class="bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition flex items-center gap-1"><i class="fa-solid fa-file-export"></i> Archivia Anno</button></div></div>
 </div>
 </section>
+
 <section id="sezione-report" class="tab-contenuto hidden space-y-6">
 <div class="bg-white rounded-xl shadow-md p-5 border border-slate-200">
 <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 border-b pb-3"><div><h2 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-chart-line text-purple-600"></i> Report & Estrazioni Dati</h2><p class="text-xs text-slate-500">Analisi avanzate su straordinari, capitalizzazione OdM e assenze.</p></div></div>
@@ -289,6 +344,7 @@ window.auth.onAuthStateChanged(user=>{
 <div class="overflow-x-auto"><table id="tabellaReport" class="report-table"><thead id="theadReport"></thead><tbody id="tbodyReport"></tbody><tfoot id="tfootReport"></tfoot></table></div>
 </div>
 </section>
+
 <section id="sezione-schema-nominativi" class="tab-contenuto hidden space-y-6">
 <div class="bg-white rounded-xl shadow-md p-5 border border-slate-200">
 <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 border-b pb-3">
@@ -301,6 +357,7 @@ window.auth.onAuthStateChanged(user=>{
 </div>
 </div>
 </section>
+
 <section id="sezione-festivita" class="tab-contenuto hidden space-y-6">
 <div class="bg-white rounded-xl shadow-md p-5 border border-slate-200">
 <div class="flex justify-between items-center mb-1"><h2 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-church text-amber-600"></i> Gestione Festività Nazionali & Patroni EMR</h2><button type="button" onclick="resetFestivitaPredefinite()" class="text-xs bg-slate-200 hover:bg-slate-300 font-bold px-2.5 py-1 rounded text-slate-700 transition"><i class="fa-solid fa-rotate-left mr-1"></i> Ripristina</button></div>
@@ -315,6 +372,7 @@ window.auth.onAuthStateChanged(user=>{
 <div class="overflow-x-auto"><table class="w-full text-left border-collapse text-xs"><thead><tr class="bg-slate-800 text-white uppercase font-bold"><th class="p-2.5">Nome Festività</th><th class="p-2.5">Data Ricorrenza</th><th class="p-2.5">Tipologia</th><th class="p-2.5">Sede / Comune Applicato</th><th class="p-2.5 text-center">Azione</th></tr></thead><tbody id="tabellaFestivita" class="divide-y divide-slate-200"></tbody></table></div>
 </div>
 </section>
+
 <section id="sezione-reperibilita" class="tab-contenuto hidden space-y-6">
 <div class="bg-white rounded-xl shadow-md p-5 border border-slate-200">
 <div class="flex flex-col md:flex-row justify-between items-center gap-4 mb-5 border-b pb-4">
@@ -325,27 +383,106 @@ window.auth.onAuthStateChanged(user=>{
 <div class="schema-reperibilita-wrapper"><table class="schema-reperibilita-table text-center border-collapse text-xs"><caption id="captionStampaReperibilita" class="caption-top text-lg font-bold text-slate-800 mb-2"></caption><tbody id="tabellaSchemaReperibilita"></tbody></table></div>
 </div>
 </section>
+
 </main>
 </div>
+
 <div id="modalAttivita" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden flex items-center justify-center z-50 p-4"><div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-5 border border-slate-200 space-y-4 modal-scroll"><div class="flex justify-between items-center border-b pb-2"><h3 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-calendar-plus text-blue-600"></i> <span id="modalTitolo">Assegna Attività</span></h3><button type="button" onclick="chiudiModalAttivita()" class="text-slate-400 hover:text-slate-600 text-lg"><i class="fa-solid fa-xmark"></i></button></div><div class="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs space-y-1"><div><strong>Dipendente:</strong> <span id="mNomeDip" class="text-blue-700 font-bold">---</span></div><div><strong>Data:</strong> <span id="mData" class="text-slate-700 font-semibold">---</span> | <strong>Sede:</strong> <span id="mSede" class="font-bold text-amber-800">---</span></div><div id="mInfoReperibAuto" class="text-[11px] font-bold text-rose-700 pt-1"></div></div><div><label class="block text-xs font-bold text-slate-600 uppercase mb-2">Inserimenti ed Eccezioni del Giorno:</label><div id="mListaAttivita" class="space-y-2 max-h-40 overflow-y-auto p-1"></div></div><form id="formNuovaAttivita" onsubmit="salvaAttivitaModal(event)" class="border-t pt-3 space-y-3"><input type="hidden" id="modificaAttId" value=""><div class="grid grid-cols-2 gap-2"><div><label class="block text-[11px] font-bold text-slate-600 uppercase">Causale / Tipo *</label><select id="mTipo" onchange="toggleFormTipoModal()" class="w-full border rounded px-2 py-1 text-xs font-bold"><option value="ODM">Lavoro con OdM</option><option value="FE">FE - Ferie</option><option value="MA">MA - Malattia</option><option value="RC">RC - Riposo Compensativo</option><option value="RF">RF - Riposo Fisiologico</option><option value="FA">FA - Ex Festività</option><option value="REPERIBILE_ADD">Aggiungi Reperibilità</option><option value="REPERIBILE_DEL">CANCELLA Reperibilità</option></select></div><div id="boxODM"><label class="block text-[11px] font-bold text-slate-600 uppercase">OdM / NTW *</label><input type="text" id="mODM" placeholder="4001234567" class="w-full border rounded px-2 py-1 text-xs font-semibold" list="datalistODM" autocomplete="on"></div></div><div id="boxDescrizione"><label class="block text-[11px] font-bold text-slate-600 uppercase">Descrizione / Note</label><input type="text" id="mDescrizione" class="w-full border rounded px-2 py-1 text-xs font-semibold" list="datalistDescrizione" autocomplete="on"></div><div id="boxDurata" class="grid grid-cols-2 gap-2"><div><label class="block text-[11px] font-bold text-slate-600 uppercase">Durata Ore / Minuti *</label><div class="flex items-center gap-1"><input type="number" id="mOre" min="0" max="24" value="7" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"><span class="font-bold text-slate-400">:</span><input type="number" id="mMin" min="0" max="59" value="36" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"></div></div><div id="boxOP"><label class="block text-[11px] font-bold text-slate-600 uppercase">Operazione (OP)</label><input type="text" id="mOP" value="0010" class="w-full border rounded px-2 py-1 text-xs font-semibold"></div></div><div id="boxOreSpeciali" class="grid grid-cols-2 gap-2 bg-blue-50 p-2 rounded border border-blue-200"><div><label class="block text-[11px] font-bold text-blue-800 uppercase">Ore Norm / Min Norm</label><div class="flex items-center gap-1"><input type="number" id="mOreNorm" min="0" max="24" value="0" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"><span class="font-bold text-slate-400">:</span><input type="number" id="mMinNorm" min="0" max="59" value="0" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"></div></div><div><label class="block text-[11px] font-bold text-purple-800 uppercase">Ore Spec / Min Spec</label><div class="flex items-center gap-1"><input type="number" id="mOreSpec" min="0" max="24" value="0" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"><span class="font-bold text-slate-400">:</span><input type="number" id="mMinSpec" min="0" max="59" value="0" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"></div></div><div class="col-span-2 text-[11px] text-slate-600 italic" id="mValidazioneOre"></div></div><div class="flex justify-end gap-2 pt-2"><button type="button" onclick="chiudiModalAttivita()" class="px-3 py-1.5 rounded text-xs font-semibold bg-slate-200 text-slate-700 hover:bg-slate-300">Chiudi</button><button type="submit" class="px-4 py-1.5 rounded text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 shadow" id="btnSalvaAttivita">Applica</button></div></form></div></div>
+
 <div id="modalCopiaAttivita" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden flex items-center justify-center z-[60] p-4"><div class="bg-white rounded-xl shadow-2xl max-w-md w-full p-5 border border-slate-200 space-y-4"><div class="flex justify-between items-center border-b pb-2"><h3 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-copy text-blue-600"></i> Copia Attività</h3><button type="button" onclick="chiudiModalCopia()" class="text-slate-400 hover:text-slate-600 text-lg"><i class="fa-solid fa-xmark"></i></button></div><div class="bg-blue-50 p-3 rounded-lg border border-blue-200 text-xs"><div><strong>Attività originale:</strong> <span id="copiaInfoAtt" class="text-blue-700 font-bold">---</span></div><div><strong>Data:</strong> <span id="copiaInfoData" class="text-slate-700 font-semibold">---</span></div></div><form id="formCopiaAttivita" onsubmit="confermaCopiaAttivita(event)" class="space-y-3"><input type="hidden" id="copiaAttId"><div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Nuova Data *</label><input type="date" id="copiaNuovaData" required class="w-full border rounded px-2 py-1 text-xs font-bold"></div><div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Nuovo Dipendente (opzionale)</label><select id="copiaNuovoDip" class="w-full border rounded px-2 py-1 text-xs font-bold"><option value="">-- Mantieni stesso dipendente --</option></select></div><div class="flex items-center gap-2"><input type="checkbox" id="copiaEliminaOriginale" class="rounded"><label for="copiaEliminaOriginale" class="text-xs font-semibold text-slate-700">Elimina attività originale dopo la copia</label></div><div class="flex justify-end gap-2 pt-2"><button type="button" onclick="chiudiModalCopia()" class="px-3 py-1.5 rounded text-xs font-semibold bg-slate-200 text-slate-700 hover:bg-slate-300">Annulla</button><button type="submit" class="px-4 py-1.5 rounded text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 shadow">Copia</button></div></form></div></div>
+
 <div id="modalModificaDip" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden flex items-center justify-center z-50 p-4"><div class="bg-white rounded-xl shadow-2xl max-w-4xl w-full p-5 border border-slate-200 space-y-4 modal-scroll"><div class="flex justify-between items-center border-b pb-2"><h3 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-user-pen text-blue-600"></i> Modifica Dipendente</h3><button type="button" onclick="chiudiModalModificaDip()" class="text-slate-400 hover:text-slate-600 text-lg"><i class="fa-solid fa-xmark"></i></button></div><form id="formModificaDipendente" onsubmit="salvaModificaDipendente(event)" class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs"><input type="hidden" id="editCID_old"><div><label class="block font-bold text-slate-600 uppercase mb-1">CID *</label><input type="text" id="editCID" required class="w-full border rounded px-2 py-1 font-bold bg-slate-100" readonly></div><div><label class="block font-bold text-slate-600 uppercase mb-1">Cognome *</label><input type="text" id="editCognome" required class="w-full border rounded px-2 py-1 font-semibold"></div><div><label class="block font-bold text-slate-600 uppercase mb-1">Nome *</label><input type="text" id="editNome" required class="w-full border rounded px-2 py-1 font-semibold"></div><div><label class="block font-bold text-slate-600 uppercase mb-1">Suffisso Email</label><input type="text" id="editSuffisso" class="w-full border rounded px-2 py-1 font-semibold"></div><div><label class="block font-bold text-slate-600 uppercase mb-1">MSP (CLAV) *</label><input type="text" id="editMSP" required class="w-full border rounded px-2 py-1 font-bold uppercase"></div><div><label class="block font-bold text-slate-600 uppercase mb-1">C.d.L. *</label><input type="text" id="editCdL" required class="w-full border rounded px-2 py-1 font-bold uppercase"></div><div><label class="block font-bold text-slate-600 uppercase mb-1">Classe *</label><select id="editClasse" required class="w-full border rounded px-2 py-1 font-bold"><option value="O">O</option><option value="I">I</option><option value="Q">Q</option></select></div><div><label class="block font-bold text-slate-600 uppercase mb-1">Distaccamento</label><input type="text" id="editDistaccamento" class="w-full border rounded px-2 py-1 font-semibold uppercase"></div><div><label class="block font-bold text-slate-600 uppercase mb-1">Pat</label><select id="editPat" class="w-full border rounded px-2 py-1 font-bold"><option value="">---</option><option value="A">A</option><option value="B">B</option><option value="C">C</option></select></div><div><label class="block font-bold text-slate-600 uppercase mb-1">Turno/Rep</label><select id="editTurnoRep" class="w-full border rounded px-2 py-1 font-bold text-amber-800"><option value="">Nessuno</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></div><div><label class="block font-bold text-slate-600 uppercase mb-1">Sede Lavoro</label><select id="editSedeLavoro" class="w-full border rounded px-2 py-1 font-semibold"><option value="RE">RE</option><option value="PC">PC</option><option value="PR">PR</option><option value="MO">MO</option><option value="BO">BO</option><option value="FE">FE</option><option value="RA">RA</option><option value="FC">FC</option><option value="RN">RN</option></select></div><div><label class="block font-bold text-slate-600 uppercase mb-1">Residenza</label><input type="text" id="editResidenza" class="w-full border rounded px-2 py-1 font-semibold"></div><div><label class="block font-bold text-slate-600 uppercase mb-1">Cell. Lavoro</label><input type="text" id="editCellLavoro" class="w-full border rounded px-2 py-1 font-semibold"></div><div><label class="block font-bold text-slate-600 uppercase mb-1">Cell. Privato</label><input type="text" id="editCellPrivato" class="w-full border rounded px-2 py-1 font-semibold"></div><div class="col-span-2"><label class="block font-bold text-slate-600 uppercase mb-1">E-mail</label><input type="email" id="editEmail" class="w-full border rounded px-2 py-1 font-semibold"></div><div><label class="block font-bold text-slate-600 uppercase mb-1">Ingresso MS</label><input type="text" id="editIngressoMS" class="w-full border rounded px-2 py-1 font-semibold"></div><div><label class="block font-bold text-slate-600 uppercase mb-1">Quiescenza</label><input type="text" id="editQuiescenza" class="w-full border rounded px-2 py-1 font-semibold"></div><div><label class="block font-bold text-slate-600 uppercase mb-1">Decorrenza Inq.</label><input type="text" id="editDecorrenzaInq" class="w-full border rounded px-2 py-1 font-semibold"></div><div><label class="block font-bold text-slate-600 uppercase mb-1">Inq.</label><input type="text" id="editInq" class="w-full border rounded px-2 py-1 font-semibold"></div><div class="col-span-2 md:col-span-4 flex justify-end gap-2 pt-2 border-t mt-2"><button type="button" onclick="chiudiModalModificaDip()" class="px-4 py-1.5 rounded text-xs font-semibold bg-slate-200 text-slate-700 hover:bg-slate-300">Annulla</button><button type="submit" class="px-4 py-1.5 rounded text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 shadow">Salva Modifiche</button></div></form></div></div>
+
 <datalist id="datalistODM"></datalist>
 <datalist id="datalistDescrizione"></datalist>
+
 <script>
-window.startApp=function(){window.dipendenti=JSON.parse(localStorage.getItem('team_dipendenti_db'))||[];window.festivitaCustom=JSON.parse(localStorage.getItem('team_festivita_db'))||[];window.attivitaCalendario=JSON.parse(localStorage.getItem('team_attivita_db'))||[];window.consuntivazioneData=JSON.parse(localStorage.getItem('team_consuntivazione_db'))||[];window.schemaNominativiRaw=JSON.parse(localStorage.getItem('team_schema_nominativi_db'))||null;if(typeof renderDipendenti==='function')renderDipendenti();if(typeof popolaAnniIniziali==='function')popolaAnniIniziali();if(typeof popolaSelettoreAnniSchema==='function')popolaSelettoreAnniSchema();if(typeof popolaFiltroMSP==='function')popolaFiltroMSP();if(typeof popolaFiltroMSPSchemaNominativi==='function')popolaFiltroMSPSchemaNominativi();if(typeof popolaFiltriReport==='function')popolaFiltriReport();if(typeof popolaFiltriConsuntivazione==='function')popolaFiltriConsuntivazione();if(typeof renderFestivita==='function')renderFestivita();if(typeof aggiornaSchemaNominativi==='function')aggiornaSchemaNominativi();if(typeof aggiornaIndicatoreSpazio==='function')aggiornaIndicatoreSpazio();if(typeof aggiornaDatalistAutocompletamento==='function')aggiornaDatalistAutocompletamento();if(typeof generaTabellaReperibilita==='function')generaTabellaReperibilita(2026);if(typeof cambiaTab==='function')cambiaTab('calendario');};
+// ============================================================
+// DATI DI DEFAULT (usati solo se Firebase è vuoto)
+// ============================================================
 const MINUTI_GIORNATA_STANDARD=456,MAX_MINUTI_RF=456;
 const MATRICE_REPERIBILITA_DEFAULT={2016:[1,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2],2017:[2,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3],2018:[3,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4],2019:[4,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1],2020:[1,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2],2021:[2,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,3],2022:[1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4],2023:[2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1],2024:[3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2],2025:[3,4,1,2,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3],2026:[4,1,2,3,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1],2027:[2,3,4,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2],2028:[3,4,1,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3],2029:[4,1,2,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4],2030:[1,2,3,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1],2031:[2,3,4,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2],2032:[3,4,1,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4],2033:[1,2,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1],2034:[2,3,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2],2035:[3,4,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3],2036:[4,1,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4],2037:[1,2,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2],2038:[3,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3],2039:[4,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4],2040:[1,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1]};
-let MATRICE_REPERIBILITA=JSON.parse(JSON.stringify(MATRICE_REPERIBILITA_DEFAULT));
-let dipendenti=JSON.parse(localStorage.getItem('team_dipendenti_db'))||[{cid:'00256247',nome:'Emanuele',cognome:'Bongiorni',nominativo:'BONGIORNI EMANUELE',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'B',turnoRep:'3',sedeLavoro:'PC',residenza:'Rottofreno (PC)',cellLavoro:'329 430 6107',cellPrivato:'347 535 8931',email:'emanuele.bongiorni@e-distribuzione.com',msp:'EEMM2',ingressoMS:'',quiescenza:'---',decorrenzaInq:'01/12/2023',inq:'A1'},{cid:'00454542',nome:'Francesco',cognome:'Cavallotti',nominativo:'CAVALLOTTI FRANCESCO',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'C',turnoRep:'3',sedeLavoro:'PC',residenza:'Casaliggio (PC)',cellLavoro:'324 880 7673',cellPrivato:'329 963 4812',email:'francesco.cavallotti@e-distribuzione.com',msp:'EEMM2',ingressoMS:'01/01/2023',quiescenza:'---',decorrenzaInq:'',inq:'B1S'},{cid:'00250970',nome:'Mattia',cognome:'Bisi',nominativo:'BISI MATTIA',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'C',turnoRep:'4',sedeLavoro:'RE',residenza:'Fabbrico (RE)',cellLavoro:'320 019 7953',cellPrivato:'347 108 6991',email:'mattia.bisi@e-distribuzione.com',msp:'EEMM2',ingressoMS:'',quiescenza:'---',decorrenzaInq:'01/03/2022',inq:'---'},{cid:'00452743',nome:'Antonino',cognome:'Cannata',nominativo:'CANNATA ANTONINO',suffisso_email:'2',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'B',turnoRep:'1',sedeLavoro:'RE',residenza:'Correggio (RE)',cellLavoro:'380 741 2464',cellPrivato:'329 131 5471',email:'antonino.cannata2@e-distribuzione.com',msp:'EEMM2',ingressoMS:'',quiescenza:'---',decorrenzaInq:'01/05/2022',inq:'---'},{cid:'00249071',nome:'Marco',cognome:'Fanti',nominativo:'FANTI MARCO',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'B',turnoRep:'4',sedeLavoro:'RE',residenza:'Reggio Emilia (RE)',cellLavoro:'329 430 6355',cellPrivato:'---',email:'marco.fanti@e-distribuzione.com',msp:'EEMM2',ingressoMS:'',quiescenza:'---',decorrenzaInq:'01/12/2019',inq:'---'},{cid:'00427128',nome:'Andrea',cognome:'Fedolfi',nominativo:'FEDOLFI ANDREA',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'B',turnoRep:'2',sedeLavoro:'RE',residenza:'Bibbiano (RE)',cellLavoro:'329 430 6350',cellPrivato:'347 984 2316',email:'andrea.fedolfi@e-distribuzione.com',msp:'EEMM2',ingressoMS:'',quiescenza:'---',decorrenzaInq:'01/12/2016',inq:'---'},{cid:'00255747',nome:'Cristian',cognome:'Magnani',nominativo:'MAGNANI CRISTIAN',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'C',turnoRep:'2',sedeLavoro:'RE',residenza:'Poviglio (RE)',cellLavoro:'329 430 5952',cellPrivato:'331 110 2183',email:'cristian.magnani@e-distribuzione.com',msp:'EEMM2',ingressoMS:'',quiescenza:'---',decorrenzaInq:'01/10/2022',inq:'---'},{cid:'00256676',nome:'Marco',cognome:'Scrivani',nominativo:'SCRIVANI MARCO',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'C',turnoRep:'3',sedeLavoro:'PC',residenza:'Podenzano (PC)',cellLavoro:'329 240 5995',cellPrivato:'328 679 6654',email:'marco.scrivani@e-distribuzione.com',msp:'EEMM2',ingressoMS:'01/07/2026',quiescenza:'---',decorrenzaInq:'',inq:''},{cid:'00256244',nome:'Marco',cognome:'Orsini',nominativo:'ORSINI MARCO',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'C',turnoRep:'4',sedeLavoro:'RE',residenza:'Cittanova (MO)',cellLavoro:'329 240 6094',cellPrivato:'---',email:'marco.orsini@e-distribuzione.com',msp:'EEMM2',ingressoMS:'01/03/2023',quiescenza:'---',decorrenzaInq:'',inq:'BSS'},{cid:'00426853',nome:'Sandro',cognome:'Sponghi',nominativo:'SPONGHI SANDRO',suffisso_email:'',cdL:'EEMM2-2I',classe:'Q',distaccamento:'MS-RE',pat:'C',turnoRep:'3',sedeLavoro:'RE',residenza:'Valsamoggia (BO)',cellLavoro:'329 430 6267',cellPrivato:'334 713 7360',email:'sandro.sponghi@e-distribuzione.com',msp:'EEMM2',ingressoMS:'01/09/1994',quiescenza:'---',decorrenzaInq:'01/12/2020',inq:'---'},{cid:'00256375',nome:'Davide',cognome:'Vacondio',nominativo:'VACONDIO DAVIDE',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'B',turnoRep:'1',sedeLavoro:'RE',residenza:'Gavasseto (RE)',cellLavoro:'329 430 6353',cellPrivato:'349 536 5258',email:'davide.vacondio@e-distribuzione.com',msp:'EEMM2',ingressoMS:'',quiescenza:'---',decorrenzaInq:'',inq:'---'},{cid:'00435117',nome:'Marco',cognome:'Valentini',nominativo:'VALENTINI MARCO',suffisso_email:'2',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'B',turnoRep:'2',sedeLavoro:'RE',residenza:'Albinea (RE)',cellLavoro:'320 113 4578',cellPrivato:'346 412 3142',email:'marco.valentini2@e-distribuzione.com',msp:'EEMM2',ingressoMS:'',quiescenza:'---',decorrenzaInq:'',inq:'---'}];
+const DIPENDENTI_DEFAULT=[{cid:'00256247',nome:'Emanuele',cognome:'Bongiorni',nominativo:'BONGIORNI EMANUELE',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'B',turnoRep:'3',sedeLavoro:'PC',residenza:'Rottofreno (PC)',cellLavoro:'329 430 6107',cellPrivato:'347 535 8931',email:'emanuele.bongiorni@e-distribuzione.com',msp:'EEMM2',ingressoMS:'',quiescenza:'---',decorrenzaInq:'01/12/2023',inq:'A1'},{cid:'00454542',nome:'Francesco',cognome:'Cavallotti',nominativo:'CAVALLOTTI FRANCESCO',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'C',turnoRep:'3',sedeLavoro:'PC',residenza:'Casaliggio (PC)',cellLavoro:'324 880 7673',cellPrivato:'329 963 4812',email:'francesco.cavallotti@e-distribuzione.com',msp:'EEMM2',ingressoMS:'01/01/2023',quiescenza:'---',decorrenzaInq:'',inq:'B1S'},{cid:'00250970',nome:'Mattia',cognome:'Bisi',nominativo:'BISI MATTIA',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'C',turnoRep:'4',sedeLavoro:'RE',residenza:'Fabbrico (RE)',cellLavoro:'320 019 7953',cellPrivato:'347 108 6991',email:'mattia.bisi@e-distribuzione.com',msp:'EEMM2',ingressoMS:'',quiescenza:'---',decorrenzaInq:'01/03/2022',inq:'---'},{cid:'00452743',nome:'Antonino',cognome:'Cannata',nominativo:'CANNATA ANTONINO',suffisso_email:'2',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'B',turnoRep:'1',sedeLavoro:'RE',residenza:'Correggio (RE)',cellLavoro:'380 741 2464',cellPrivato:'329 131 5471',email:'antonino.cannata2@e-distribuzione.com',msp:'EEMM2',ingressoMS:'',quiescenza:'---',decorrenzaInq:'01/05/2022',inq:'---'},{cid:'00249071',nome:'Marco',cognome:'Fanti',nominativo:'FANTI MARCO',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'B',turnoRep:'4',sedeLavoro:'RE',residenza:'Reggio Emilia (RE)',cellLavoro:'329 430 6355',cellPrivato:'---',email:'marco.fanti@e-distribuzione.com',msp:'EEMM2',ingressoMS:'',quiescenza:'---',decorrenzaInq:'01/12/2019',inq:'---'},{cid:'00427128',nome:'Andrea',cognome:'Fedolfi',nominativo:'FEDOLFI ANDREA',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'B',turnoRep:'2',sedeLavoro:'RE',residenza:'Bibbiano (RE)',cellLavoro:'329 430 6350',cellPrivato:'347 984 2316',email:'andrea.fedolfi@e-distribuzione.com',msp:'EEMM2',ingressoMS:'',quiescenza:'---',decorrenzaInq:'01/12/2016',inq:'---'},{cid:'00255747',nome:'Cristian',cognome:'Magnani',nominativo:'MAGNANI CRISTIAN',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'C',turnoRep:'2',sedeLavoro:'RE',residenza:'Poviglio (RE)',cellLavoro:'329 430 5952',cellPrivato:'331 110 2183',email:'cristian.magnani@e-distribuzione.com',msp:'EEMM2',ingressoMS:'',quiescenza:'---',decorrenzaInq:'01/10/2022',inq:'---'},{cid:'00256676',nome:'Marco',cognome:'Scrivani',nominativo:'SCRIVANI MARCO',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'C',turnoRep:'3',sedeLavoro:'PC',residenza:'Podenzano (PC)',cellLavoro:'329 240 5995',cellPrivato:'328 679 6654',email:'marco.scrivani@e-distribuzione.com',msp:'EEMM2',ingressoMS:'01/07/2026',quiescenza:'---',decorrenzaInq:'',inq:''},{cid:'00256244',nome:'Marco',cognome:'Orsini',nominativo:'ORSINI MARCO',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'C',turnoRep:'4',sedeLavoro:'RE',residenza:'Cittanova (MO)',cellLavoro:'329 240 6094',cellPrivato:'---',email:'marco.orsini@e-distribuzione.com',msp:'EEMM2',ingressoMS:'01/03/2023',quiescenza:'---',decorrenzaInq:'',inq:'BSS'},{cid:'00426853',nome:'Sandro',cognome:'Sponghi',nominativo:'SPONGHI SANDRO',suffisso_email:'',cdL:'EEMM2-2I',classe:'Q',distaccamento:'MS-RE',pat:'C',turnoRep:'3',sedeLavoro:'RE',residenza:'Valsamoggia (BO)',cellLavoro:'329 430 6267',cellPrivato:'334 713 7360',email:'sandro.sponghi@e-distribuzione.com',msp:'EEMM2',ingressoMS:'01/09/1994',quiescenza:'---',decorrenzaInq:'01/12/2020',inq:'---'},{cid:'00256375',nome:'Davide',cognome:'Vacondio',nominativo:'VACONDIO DAVIDE',suffisso_email:'',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'B',turnoRep:'1',sedeLavoro:'RE',residenza:'Gavasseto (RE)',cellLavoro:'329 430 6353',cellPrivato:'349 536 5258',email:'davide.vacondio@e-distribuzione.com',msp:'EEMM2',ingressoMS:'',quiescenza:'---',decorrenzaInq:'',inq:'---'},{cid:'00435117',nome:'Marco',cognome:'Valentini',nominativo:'VALENTINI MARCO',suffisso_email:'2',cdL:'EEMM2-2I',classe:'I',distaccamento:'MS-RE',pat:'B',turnoRep:'2',sedeLavoro:'RE',residenza:'Albinea (RE)',cellLavoro:'320 113 4578',cellPrivato:'346 412 3142',email:'marco.valentini2@e-distribuzione.com',msp:'EEMM2',ingressoMS:'',quiescenza:'---',decorrenzaInq:'',inq:'---'}];
 const FESTIVITA_PREDEFINITE=[{id:'1',nome:'S. Petronio',giorno:4,mese:9,tipo:'PATRONO',sede:'BO'},{id:'2',nome:'S. Antonino',giorno:4,mese:6,tipo:'PATRONO',sede:'PC'},{id:'3',nome:'S. Ilario',giorno:13,mese:0,tipo:'PATRONO',sede:'PR'},{id:'4',nome:'S. Prospero',giorno:24,mese:10,tipo:'PATRONO',sede:'RE'},{id:'5',nome:'S. Geminiano',giorno:31,mese:0,tipo:'PATRONO',sede:'MO'},{id:'6',nome:'S. Giorgio',giorno:23,mese:3,tipo:'PATRONO',sede:'FE'},{id:'7',nome:'S. Apollinare',giorno:23,mese:6,tipo:'PATRONO',sede:'RA'},{id:'8',nome:'Madonna del Fuoco',giorno:4,mese:1,tipo:'PATRONO',sede:'FC'},{id:'9',nome:'S. Gaudenzio',giorno:14,mese:9,tipo:'PATRONO',sede:'RN'}];
-let festivitaCustom=JSON.parse(localStorage.getItem('team_festivita_db'))||FESTIVITA_PREDEFINITE;
-let attivitaCalendario=JSON.parse(localStorage.getItem('team_attivita_db'))||[];
-let consuntivazioneData=JSON.parse(localStorage.getItem('team_consuntivazione_db'))||[];
-let schemaNominativiRaw=JSON.parse(localStorage.getItem('team_schema_nominativi_db'))||null;
+
+// Variabili globali
+let MATRICE_REPERIBILITA=JSON.parse(JSON.stringify(MATRICE_REPERIBILITA_DEFAULT));
+let dipendenti=[];
+let festivitaCustom=[];
+let attivitaCalendario=[];
+let consuntivazioneData=[];
+let schemaNominativiRaw=null;
 let schemaNominativi={};
-if(schemaNominativiRaw&&!schemaNominativiRaw['EEMM2']&&schemaNominativiRaw.tecnici){schemaNominativi['EEMM2']={tecnici:schemaNominativiRaw.tecnici||[],operativi:schemaNominativiRaw.operativi||[]};}else if(schemaNominativiRaw){schemaNominativi=schemaNominativiRaw;}else{schemaNominativi['EEMM2']={tecnici:[{gruppo:1,cid:'00256375'},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:2,cid:'00427128'},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:3,cid:'00426853'},{gruppo:3,cid:'00256247'},{gruppo:3,cid:''},{gruppo:3,cid:''},{gruppo:4,cid:'00249071'},{gruppo:4,cid:''},{gruppo:4,cid:''},{gruppo:4,cid:''}],operativi:[{gruppo:1,cid:'00256375'},{gruppo:1,cid:'00452743'},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:2,cid:'00255747'},{gruppo:2,cid:'00435117'},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:3,cid:''},{gruppo:3,cid:'00454542'},{gruppo:3,cid:'00256676'},{gruppo:3,cid:''},{gruppo:3,cid:''},{gruppo:3,cid:''},{gruppo:4,cid:''},{gruppo:4,cid:'00250970'},{gruppo:4,cid:'00256244'},{gruppo:4,cid:''},{gruppo:4,cid:''},{gruppo:4,cid:''}]};}
-let mspCorrenteSchema='EEMM2',turnoEvidenziatoPersREP=null,vistaAttuale='annuale',dataRiferimento=new Date(),festInModifica=null,modalitaCID=null,modalitaData=null,modalitaModifica=false;
+let mspCorrenteSchema='EEMM2';
+let turnoEvidenziatoPersREP=null;
+let vistaAttuale='annuale';
+let dataRiferimento=new Date();
+let festInModifica=null;
+let modalitaCID=null;
+let modalitaData=null;
+let modalitaModifica=false;
+let firebaseInitialized=false;
+
+// ============================================================
+// ✅ FIX CRITICO: startApp che aspetta Firebase prima di renderizzare
+// ============================================================
+window.startApp = function() {
+    // Carica dati da localStorage (fallback se Firebase è lento)
+    window.dipendenti = JSON.parse(localStorage.getItem('team_dipendenti_db')) || DIPENDENTI_DEFAULT;
+    window.festivitaCustom = JSON.parse(localStorage.getItem('team_festivita_db')) || FESTIVITA_PREDEFINITE;
+    window.attivitaCalendario = JSON.parse(localStorage.getItem('team_attivita_db')) || [];
+    window.consuntivazioneData = JSON.parse(localStorage.getItem('team_consuntivazione_db')) || [];
+    window.schemaNominativiRaw = JSON.parse(localStorage.getItem('team_schema_nominativi_db')) || null;
+    window.MATRICE_REPERIBILITA = JSON.parse(localStorage.getItem('team_matrice_reperibilita_db')) || JSON.parse(JSON.stringify(MATRICE_REPERIBILITA_DEFAULT));
+    
+    // Inizializza schemaNominativi
+    if (schemaNominativiRaw && !schemaNominativiRaw['EEMM2'] && schemaNominativiRaw.tecnici) {
+        schemaNominativi['EEMM2'] = { tecnici: schemaNominativiRaw.tecnici || [], operativi: schemaNominativiRaw.operativi || [] };
+    } else if (schemaNominativiRaw) {
+        schemaNominativi = schemaNominativiRaw;
+    } else {
+        schemaNominativi['EEMM2'] = {
+            tecnici: [{gruppo:1,cid:'00256375'},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:2,cid:'00427128'},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:3,cid:'00426853'},{gruppo:3,cid:'00256247'},{gruppo:3,cid:''},{gruppo:3,cid:''},{gruppo:4,cid:'00249071'},{gruppo:4,cid:''},{gruppo:4,cid:''},{gruppo:4,cid:''}],
+            operativi: [{gruppo:1,cid:'00256375'},{gruppo:1,cid:'00452743'},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:2,cid:'00255747'},{gruppo:2,cid:'00435117'},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:3,cid:''},{gruppo:3,cid:'00454542'},{gruppo:3,cid:'00256676'},{gruppo:3,cid:''},{gruppo:3,cid:''},{gruppo:3,cid:''},{gruppo:4,cid:''},{gruppo:4,cid:'00250970'},{gruppo:4,cid:'00256244'},{gruppo:4,cid:''},{gruppo:4,cid:''},{gruppo:4,cid:''}]
+        };
+    }
+    
+    // ✅ FIX CRITICO: NON chiamare renderDipendenti() qui!
+    // Aspettiamo che Firebase carichi i dati (o il timeout di 3 secondi)
+    
+    if (typeof popolaAnniIniziali === 'function') popolaAnniIniziali();
+    if (typeof popolaSelettoreAnniSchema === 'function') popolaSelettoreAnniSchema();
+    if (typeof popolaFiltroMSP === 'function') popolaFiltroMSP();
+    if (typeof popolaFiltroMSPSchemaNominativi === 'function') popolaFiltroMSPSchemaNominativi();
+    if (typeof popolaFiltriReport === 'function') popolaFiltriReport();
+    if (typeof popolaFiltriConsuntivazione === 'function') popolaFiltriConsuntivazione();
+    if (typeof aggiornaIndicatoreSpazio === 'function') aggiornaIndicatoreSpazio();
+    if (typeof aggiornaDatalistAutocompletamento === 'function') aggiornaDatalistAutocompletamento();
+    if (typeof generaTabellaReperibilita === 'function') generaTabellaReperibilita(2026);
+    if (typeof cambiaTab === 'function') cambiaTab('calendario');
+    
+    // ✅ FIX CRITICO: Timeout per caricamento Firebase
+    // Se dopo 3 secondi Firebase non ha caricato dati, usa i dati locali
+    setTimeout(() => {
+        if (!firebaseInitialized) {
+            console.log('⏰ Timeout Firebase: uso dati locali');
+            firebaseInitialized = true;
+            if (typeof renderDipendenti === 'function') renderDipendenti();
+            if (typeof renderFestivita === 'function') renderFestivita();
+            if (typeof aggiornaCalendario === 'function') aggiornaCalendario();
+            if (typeof aggiornaSchemaNominativi === 'function') aggiornaSchemaNominativi();
+        }
+    }, 3000);
+};
+
+// ✅ FIX CRITICO: Flag per indicare che Firebase ha caricato i dati
+function markFirebaseLoaded() {
+    firebaseInitialized = true;
+}
+
+// ============================================================
+// FUNZIONI UTILITY
+// ============================================================
 function formattaCID(cid){if(!cid||cid.trim()==='')return'';return String(cid).trim().padStart(8,'0');}
 function formatoOrdinaleSettimana(num){return num+'°';}
 function formattaDataExcel(valore){if(!valore)return'';const num=parseFloat(valore);if(isNaN(num)||num<1000)return valore;const data=new Date(Math.round((num-25569)*86400*1000));return`${String(data.getDate()).padStart(2,'0')}/${String(data.getMonth()+1).padStart(2,'0')}/${data.getFullYear()}`;}
@@ -407,19 +544,49 @@ function onCambiaFiltroTurnoSchema(){const filtroTurno=document.getElementById('
 function onCambiaFiltroTurnoPersREP(){const filtroTurno=document.getElementById('filtroTurnoSchemaPersREP').value;turnoEvidenziatoPersREP=filtroTurno||null;const selectReperib=document.getElementById('filtroTurnoSchema');if(selectReperib)selectReperib.value=filtroTurno;aggiornaSchemaNominativi();const sezioneReperib=document.getElementById('sezione-reperibilita');if(!sezioneReperib.classList.contains('hidden')){generaTabellaReperibilita(document.getElementById('annoSchemaReperibilita').value);}}
 function cambiaTab(tabId){document.querySelectorAll('.tab-contenuto').forEach(el=>el.classList.add('hidden'));document.querySelectorAll('.tab-contenuto').forEach(el=>el.classList.remove('active-for-print'));document.querySelectorAll('.btn-tab').forEach(el=>{el.classList.remove('bg-blue-800','text-white','shadow');el.classList.add('text-slate-300','hover:text-white','hover:bg-slate-800');});document.getElementById(`sezione-${tabId}`).classList.remove('hidden');const btnActive=document.getElementById(`tab-${tabId}`);btnActive.classList.add('bg-blue-800','text-white','shadow');btnActive.classList.remove('text-slate-300','hover:bg-slate-800');if(tabId==='calendario'){aggiornaVisibilitaFiltriCalendario();aggiornaCalendario();}if(tabId==='reperibilita'){generaTabellaReperibilita(document.getElementById('annoSchemaReperibilita').value);const selectReperib=document.getElementById('filtroTurnoSchema');const selectPersREP=document.getElementById('filtroTurnoSchemaPersREP');if(selectReperib&&selectPersREP){selectPersREP.value=selectReperib.value;}}if(tabId==='consuntivazione'){popolaFiltriConsuntivazione();popolaSelettoreArchivio();}if(tabId==='report'){popolaFiltriReport();}if(tabId==='schema-nominativi'){popolaFiltroMSPSchemaNominativi();const selectReperib=document.getElementById('filtroTurnoSchema');const selectPersREP=document.getElementById('filtroTurnoSchemaPersREP');if(selectReperib&&selectPersREP){selectPersREP.value=selectReperib.value;turnoEvidenziatoPersREP=selectReperib.value||null;}aggiornaSchemaNominativi();}}
 function aggiornaVisibilitaFiltriCalendario(){const controlliNav=document.getElementById('controlliNavigazione');const filtroAnno=document.getElementById('filtroAnnoGroup');const filtroMese=document.getElementById('filtroMeseGroup');const filtroMSP=document.getElementById('filtroMSPGroup');const filtroCerca=document.getElementById('filtroCercaGroup');const pulsantiExcel=document.getElementById('pulsantiExcelCalendario');if(vistaAttuale==='annuale'){if(controlliNav)controlliNav.style.display='none';if(filtroAnno)filtroAnno.style.display='flex';if(filtroMese)filtroMese.style.display='none';if(filtroMSP)filtroMSP.style.display='none';if(filtroCerca)filtroCerca.style.display='none';if(pulsantiExcel)pulsantiExcel.classList.remove('hidden');}else if(vistaAttuale==='mese'){if(controlliNav)controlliNav.style.display='none';if(filtroAnno)filtroAnno.style.display='flex';if(filtroMese)filtroMese.style.display='flex';if(filtroMSP)filtroMSP.style.display='flex';if(filtroCerca)filtroCerca.style.display='none';if(pulsantiExcel)pulsantiExcel.classList.add('hidden');}else{if(controlliNav)controlliNav.style.display='flex';if(filtroAnno)filtroAnno.style.display='flex';if(filtroMese)filtroMese.style.display='flex';if(filtroMSP)filtroMSP.style.display='flex';if(filtroCerca)filtroCerca.style.display='flex';if(pulsantiExcel)pulsantiExcel.classList.add('hidden');}}
-function renderDipendenti(){const tbody=document.getElementById('tabellaDipendenti');tbody.innerHTML='';const dipendentiOrdinati=[...dipendenti].sort((a,b)=>{const distA=(a.distaccamento||'').trim().toUpperCase();const distB=(b.distaccamento||'').trim().toUpperCase();if(distA!==distB){if(!distA)return 1;if(!distB)return -1;return distA.localeCompare(distB,'it');}const sedeA=(a.sedeLavoro||'').trim().toUpperCase();const sedeB=(b.sedeLavoro||'').trim().toUpperCase();if(sedeA!==sedeB){if(!sedeA)return 1;if(!sedeB)return -1;return sedeA.localeCompare(sedeB,'it');}const cognA=(a.cognome||'').trim().toUpperCase();const cognB=(b.cognome||'').trim().toUpperCase();if(!cognA)return 1;if(!cognB)return -1;return cognA.localeCompare(cognB,'it');});dipendentiOrdinati.forEach(d=>{const tr=document.createElement('tr');tr.className="hover:bg-slate-50 border-b border-slate-200";tr.innerHTML=`<td class="p-2 font-mono font-bold border-r border-slate-200">${formattaCID(d.cid)}</td><td class="p-2 font-semibold border-r border-slate-200">${d.cognome} ${d.nome}</td><td class="p-2 font-bold text-blue-700 border-r border-slate-200">${d.msp||''}</td><td class="p-2 font-mono border-r border-slate-200">${d.cdL||''}</td><td class="p-2 text-center border-r border-slate-200"><span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${d.classe==='O'?'bg-amber-100 text-amber-800':(d.classe==='Q'?'bg-purple-100 text-purple-800':'bg-blue-100 text-blue-800')}">${d.classe}</span></td><td class="p-2 text-center border-r border-slate-200">${d.distaccamento||''}</td><td class="p-2 text-center border-r border-slate-200 font-bold">${d.pat||'-'}</td><td class="p-2 text-center border-r border-slate-200 font-bold text-amber-800">${d.turnoRep||'-'}</td><td class="p-2 text-center border-r border-slate-200">${d.sedeLavoro||''}</td><td class="p-2 border-r border-slate-200 truncate max-w-[120px]" title="${d.residenza||''}">${d.residenza||''}</td><td class="p-2 border-r border-slate-200 font-mono text-[10px]">${d.cellLavoro||''}</td><td class="p-2 border-r border-slate-200 truncate max-w-[130px]" title="${d.email||''}">${d.email||''}</td><td class="p-2 border-r border-slate-200 text-[10px]">${formattaDataExcel(d.ingressoMS)}</td><td class="p-2 border-r border-slate-200 text-[10px]">${formattaDataExcel(d.decorrenzaInq)}</td><td class="p-2 border-r border-slate-200 font-bold text-[10px]">${d.inq||''}</td><td class="p-2 text-center space-x-1"><button onclick="apriModalModificaDip('${d.cid}')" class="text-blue-600 hover:text-blue-800 p-1"><i class="fa-solid fa-pen-to-square"></i></button><button onclick="rimuoviDipendente('${d.cid}')" class="text-rose-600 hover:text-rose-800 p-1"><i class="fa-solid fa-trash-can"></i></button></td>`;tbody.appendChild(tr);});localStorage.setItem('team_dipendenti_db',JSON.stringify(dipendenti));aggiornaIndicatoreSpazio();}
+
+// ✅ FIX CRITICO: renderDipendenti con ordinamento DIST → SEDE → COGNOME
+// e SENZA scrittura su localStorage (per evitare sovrascrittura Firebase)
+function renderDipendenti(){
+    const tbody=document.getElementById('tabellaDipendenti');
+    if(!tbody)return;
+    tbody.innerHTML='';
+    
+    // Ordina per DISTACCAMENTO → SEDE → COGNOME
+    const dipendentiOrdinati=[...dipendenti].sort((a,b)=>{
+        const distA=(a.distaccamento||'').trim().toUpperCase();
+        const distB=(b.distaccamento||'').trim().toUpperCase();
+        if(distA!==distB){if(!distA)return 1;if(!distB)return -1;return distA.localeCompare(distB,'it');}
+        const sedeA=(a.sedeLavoro||'').trim().toUpperCase();
+        const sedeB=(b.sedeLavoro||'').trim().toUpperCase();
+        if(sedeA!==sedeB){if(!sedeA)return 1;if(!sedeB)return -1;return sedeA.localeCompare(sedeB,'it');}
+        const cognA=(a.cognome||'').trim().toUpperCase();
+        const cognB=(b.cognome||'').trim().toUpperCase();
+        if(!cognA)return 1;if(!cognB)return -1;return cognA.localeCompare(cognB,'it');
+    });
+    
+    dipendentiOrdinati.forEach(d=>{
+        const tr=document.createElement('tr');
+        tr.className="hover:bg-slate-50 border-b border-slate-200";
+        tr.innerHTML=`<td class="p-2 font-mono font-bold border-r border-slate-200">${formattaCID(d.cid)}</td><td class="p-2 font-semibold border-r border-slate-200">${d.cognome} ${d.nome}</td><td class="p-2 font-bold text-blue-700 border-r border-slate-200">${d.msp||''}</td><td class="p-2 font-mono border-r border-slate-200">${d.cdL||''}</td><td class="p-2 text-center border-r border-slate-200"><span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${d.classe==='O'?'bg-amber-100 text-amber-800':(d.classe==='Q'?'bg-purple-100 text-purple-800':'bg-blue-100 text-blue-800')}">${d.classe}</span></td><td class="p-2 text-center border-r border-slate-200">${d.distaccamento||''}</td><td class="p-2 text-center border-r border-slate-200 font-bold">${d.pat||'-'}</td><td class="p-2 text-center border-r border-slate-200 font-bold text-amber-800">${d.turnoRep||'-'}</td><td class="p-2 text-center border-r border-slate-200">${d.sedeLavoro||''}</td><td class="p-2 border-r border-slate-200 truncate max-w-[120px]" title="${d.residenza||''}">${d.residenza||''}</td><td class="p-2 border-r border-slate-200 font-mono text-[10px]">${d.cellLavoro||''}</td><td class="p-2 border-r border-slate-200 truncate max-w-[130px]" title="${d.email||''}">${d.email||''}</td><td class="p-2 border-r border-slate-200 text-[10px]">${formattaDataExcel(d.ingressoMS)}</td><td class="p-2 border-r border-slate-200 text-[10px]">${formattaDataExcel(d.decorrenzaInq)}</td><td class="p-2 border-r border-slate-200 font-bold text-[10px]">${d.inq||''}</td><td class="p-2 text-center space-x-1"><button onclick="apriModalModificaDip('${d.cid}')" class="text-blue-600 hover:text-blue-800 p-1"><i class="fa-solid fa-pen-to-square"></i></button><button onclick="rimuoviDipendente('${d.cid}')" class="text-rose-600 hover:text-rose-800 p-1"><i class="fa-solid fa-trash-can"></i></button></td>`;
+        tbody.appendChild(tr);
+    });
+    // ✅ FIX: NON scrivere su localStorage qui (evita sovrascrittura Firebase)
+    aggiornaIndicatoreSpazio();
+}
+
 function apriModalModificaDip(cid){const d=dipendenti.find(x=>x.cid===cid);if(!d)return;document.getElementById('editCID_old').value=d.cid;document.getElementById('editCID').value=d.cid;document.getElementById('editCognome').value=d.cognome;document.getElementById('editNome').value=d.nome;document.getElementById('editSuffisso').value=d.suffisso_email||'';document.getElementById('editMSP').value=d.msp||'';document.getElementById('editCdL').value=d.cdL||'';document.getElementById('editClasse').value=d.classe;document.getElementById('editDistaccamento').value=d.distaccamento||'';document.getElementById('editPat').value=d.pat||'';document.getElementById('editTurnoRep').value=d.turnoRep||'';document.getElementById('editSedeLavoro').value=d.sedeLavoro||'RE';document.getElementById('editResidenza').value=d.residenza||'';document.getElementById('editCellLavoro').value=d.cellLavoro||'';document.getElementById('editCellPrivato').value=d.cellPrivato||'';document.getElementById('editEmail').value=d.email||'';document.getElementById('editIngressoMS').value=formattaDataExcel(d.ingressoMS);document.getElementById('editQuiescenza').value=formattaDataExcel(d.quiescenza);document.getElementById('editDecorrenzaInq').value=formattaDataExcel(d.decorrenzaInq);document.getElementById('editInq').value=d.inq||'';document.getElementById('modalModificaDip').classList.remove('hidden');}
 function chiudiModalModificaDip(){document.getElementById('modalModificaDip').classList.add('hidden');}
 function salvaModificaDipendente(e){e.preventDefault();const oldCid=document.getElementById('editCID_old').value;const idx=dipendenti.findIndex(x=>x.cid===oldCid);if(idx===-1)return;dipendenti[idx]={cid:formattaCID(document.getElementById('editCID').value.trim()),cognome:document.getElementById('editCognome').value.trim(),nome:document.getElementById('editNome').value.trim(),nominativo:(document.getElementById('editCognome').value.trim()+' '+document.getElementById('editNome').value.trim()).toUpperCase(),suffisso_email:document.getElementById('editSuffisso').value.trim(),msp:document.getElementById('editMSP').value.trim().toUpperCase(),cdL:document.getElementById('editCdL').value.trim().toUpperCase(),classe:document.getElementById('editClasse').value,distaccamento:document.getElementById('editDistaccamento').value.trim().toUpperCase(),pat:document.getElementById('editPat').value,turnoRep:document.getElementById('editTurnoRep').value,sedeLavoro:document.getElementById('editSedeLavoro').value,residenza:document.getElementById('editResidenza').value.trim(),cellLavoro:document.getElementById('editCellLavoro').value.trim(),cellPrivato:document.getElementById('editCellPrivato').value.trim(),email:document.getElementById('editEmail').value.trim(),ingressoMS:document.getElementById('editIngressoMS').value.trim(),quiescenza:document.getElementById('editQuiescenza').value.trim(),decorrenzaInq:document.getElementById('editDecorrenzaInq').value.trim(),inq:document.getElementById('editInq').value.trim()};chiudiModalModificaDip();renderDipendenti();popolaFiltroMSP();popolaFiltriConsuntivazione();aggiornaCalendario();popolaFiltroMSPSchemaNominativi();aggiornaSchemaNominativi();}
-function aggiungiDipendente(e){e.preventDefault();const cid=formattaCID(document.getElementById('addCID').value.trim());if(dipendenti.some(x=>x.cid===cid))return alert("CID già presente.");const cognome=document.getElementById('addCognome').value.trim();const nome=document.getElementById('addNome').value.trim();dipendenti.push({cid:cid,cognome:cognome,nome:nome,nominativo:(cognome+' '+nome).toUpperCase(),suffisso_email:document.getElementById('addSuffisso').value.trim(),msp:document.getElementById('addMSP').value.trim().toUpperCase(),cdL:document.getElementById('addCdL').value.trim().toUpperCase(),classe:document.getElementById('addClasse').value,distaccamento:document.getElementById('addDistaccamento').value.trim().toUpperCase(),pat:document.getElementById('addPat').value,turnoRep:document.getElementById('addTurnoRep').value,sedeLavoro:document.getElementById('addSedeLavoro').value,residenza:document.getElementById('addResidenza').value.trim(),cellLavoro:document.getElementById('addCellLavoro').value.trim(),cellPrivato:document.getElementById('addCellPrivato').value.trim(),email:document.getElementById('addEmail').value.trim(),ingressoMS:document.getElementById('addIngressoMS').value.trim(),quiescenza:document.getElementById('addQuiescenza').value.trim(),decorrenzaInq:document.getElementById('addDecorrenzaInq').value.trim(),inq:document.getElementById('addInq').value.trim()});renderDipendenti();popolaFiltroMSP();popolaFiltriConsuntivazione();document.getElementById('formNuovoDipendente').reset();popolaFiltroMSPSchemaNominativi();aggiornaSchemaNominativi();aggiornaDatalistAutocompletamento();}
-function rimuoviDipendente(cid){if(confirm(`Rimuovere dipendente CID ${cid}?`)){dipendenti=dipendenti.filter(x=>x.cid!==cid);renderDipendenti();popolaFiltroMSP();popolaFiltriConsuntivazione();popolaFiltroMSPSchemaNominativi();aggiornaSchemaNominativi();aggiornaDatalistAutocompletamento();}}
+function aggiungiDipendente(e){e.preventDefault();const cid=formattaCID(document.getElementById('addCID').value.trim());if(dipendenti.some(x=>x.cid===cid))return alert("CID già presente.");const cognome=document.getElementById('addCognome').value.trim();const nome=document.getElementById('addNome').value.trim();dipendenti.push({cid:cid,cognome:cognome,nome:nome,nominativo:(cognome+' '+nome).toUpperCase(),suffisso_email:document.getElementById('addSuffisso').value.trim(),msp:document.getElementById('addMSP').value.trim().toUpperCase(),cdL:document.getElementById('addCdL').value.trim().toUpperCase(),classe:document.getElementById('addClasse').value,distaccamento:document.getElementById('addDistaccamento').value.trim().toUpperCase(),pat:document.getElementById('addPat').value,turnoRep:document.getElementById('addTurnoRep').value,sedeLavoro:document.getElementById('addSedeLavoro').value,residenza:document.getElementById('addResidenza').value.trim(),cellLavoro:document.getElementById('addCellLavoro').value.trim(),cellPrivato:document.getElementById('addCellPrivato').value.trim(),email:document.getElementById('addEmail').value.trim(),ingressoMS:document.getElementById('addIngressoMS').value.trim(),quiescenza:document.getElementById('addQuiescenza').value.trim(),decorrenzaInq:document.getElementById('addDecorrenzaInq').value.trim(),inq:document.getElementById('addInq').value.trim()});localStorage.setItem('team_dipendenti_db',JSON.stringify(dipendenti));renderDipendenti();popolaFiltroMSP();popolaFiltriConsuntivazione();document.getElementById('formNuovoDipendente').reset();popolaFiltroMSPSchemaNominativi();aggiornaSchemaNominativi();aggiornaDatalistAutocompletamento();}
+function rimuoviDipendente(cid){if(confirm(`Rimuovere dipendente CID ${cid}?`)){dipendenti=dipendenti.filter(x=>x.cid!==cid);localStorage.setItem('team_dipendenti_db',JSON.stringify(dipendenti));renderDipendenti();popolaFiltroMSP();popolaFiltriConsuntivazione();popolaFiltroMSPSchemaNominativi();aggiornaSchemaNominativi();aggiornaDatalistAutocompletamento();}}
 function renderFestivita(){const tbody=document.getElementById('tabellaFestivita');tbody.innerHTML='';const mesiNomi=['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];festivitaCustom.forEach(f=>{const tr=document.createElement('tr');tr.className="hover:bg-slate-50 border-b border-slate-200";if(festInModifica===f.id){tr.innerHTML=`<td class="p-1.5"><input type="text" id="editFestNome_${f.id}" value="${f.nome}" class="w-full border rounded px-1.5 py-1 text-xs font-semibold"></td><td class="p-1.5"><div class="flex gap-1"><input type="number" id="editFestGiorno_${f.id}" min="1" max="31" value="${f.giorno}" class="w-1/2 border rounded px-1 py-1 text-xs font-bold text-center"><select id="editFestMese_${f.id}" class="w-1/2 border rounded px-1 py-1 text-xs font-bold">${mesiNomi.map((m,idx)=>`<option value="${idx}" ${f.mese===idx?'selected':''}>${m}</option>`).join('')}</select></div></td><td class="p-1.5"><select id="editFestTipo_${f.id}" class="w-full border rounded px-1.5 py-1 text-xs font-bold"><option value="PATRONO" ${f.tipo==='PATRONO'?'selected':''}>PATRONO</option><option value="AZIENDALE" ${f.tipo==='AZIENDALE'?'selected':''}>AZIENDALE</option></select></td><td class="p-1.5"><input type="text" id="editFestSede_${f.id}" value="${f.sede||''}" class="w-full border rounded px-1.5 py-1 text-xs font-semibold"></td><td class="p-2 text-center space-x-1"><button onclick="salvaModificaFestivita('${f.id}')" class="text-emerald-600 font-bold p-1"><i class="fa-solid fa-check text-base"></i></button><button onclick="annullaModificaFestivita()" class="text-slate-400 p-1"><i class="fa-solid fa-xmark text-base"></i></button></td>`;}else{tr.innerHTML=`<td class="p-2.5 font-bold text-slate-800">${f.nome}</td><td class="p-2.5 font-semibold">${f.giorno} ${mesiNomi[f.mese]}</td><td class="p-2.5"><span class="px-2 py-0.5 rounded text-[11px] font-bold ${f.tipo==='PATRONO'?'bg-amber-100 text-amber-900':'bg-purple-100 text-purple-900'}">${f.tipo}</span></td><td class="p-2.5 font-semibold text-slate-700">${f.tipo==='PATRONO'?f.sede:'Tutte le Sedi'}</td><td class="p-2.5 text-center space-x-1"><button onclick="attivaModificaFestivita('${f.id}')" class="text-blue-600 p-1"><i class="fa-solid fa-pen-to-square"></i></button><button onclick="rimuoviFestivita('${f.id}')" class="text-rose-600 p-1"><i class="fa-solid fa-trash-can"></i></button></td>`;}tbody.appendChild(tr);});localStorage.setItem('team_festivita_db',JSON.stringify(festivitaCustom));aggiornaIndicatoreSpazio();}
 function attivaModificaFestivita(id){festInModifica=id;renderFestivita();}
 function annullaModificaFestivita(){festInModifica=null;renderFestivita();}
 function salvaModificaFestivita(id){const fest=festivitaCustom.find(f=>f.id===id);if(!fest)return;fest.nome=document.getElementById(`editFestNome_${id}`).value.trim();fest.giorno=parseInt(document.getElementById(`editFestGiorno_${id}`).value);fest.mese=parseInt(document.getElementById(`editFestMese_${id}`).value);fest.tipo=document.getElementById(`editFestTipo_${id}`).value;fest.sede=document.getElementById(`editFestSede_${id}`).value.trim();festInModifica=null;renderFestivita();aggiornaCalendario();}
 function toggleSedePatronoForm(){document.getElementById('boxFestSede').style.display=document.getElementById('addFestTipo').value==='PATRONO'?'block':'none';}
-function aggiungiFestivitaCustom(e){e.preventDefault();const nome=document.getElementById('addFestNome').value.trim();const giorno=parseInt(document.getElementById('addFestGiorno').value);const mese=parseInt(document.getElementById('addFestMese').value);const tipo=document.getElementById('addFestTipo').value;const sede=document.getElementById('addFestSede').value.trim();if(tipo==='PATRONO'&&!sede)return alert("Inserire la sede (codice RE, PC, PR, ecc. o nome completo).");festivitaCustom.push({id:Date.now().toString(),nome,giorno,mese,tipo,sede:tipo==='PATRONO'?sede:''});renderFestivita();aggiornaCalendario();document.getElementById('formNuovaFestivita').reset();toggleSedePatronoForm();}
-function rimuoviFestivita(id){festivitaCustom=festivitaCustom.filter(f=>f.id!==id);renderFestivita();aggiornaCalendario();}
+function aggiungiFestivitaCustom(e){e.preventDefault();const nome=document.getElementById('addFestNome').value.trim();const giorno=parseInt(document.getElementById('addFestGiorno').value);const mese=parseInt(document.getElementById('addFestMese').value);const tipo=document.getElementById('addFestTipo').value;const sede=document.getElementById('addFestSede').value.trim();if(tipo==='PATRONO'&&!sede)return alert("Inserire la sede (codice RE, PC, PR, ecc. o nome completo).");festivitaCustom.push({id:Date.now().toString(),nome,giorno,mese,tipo,sede:tipo==='PATRONO'?sede:''});localStorage.setItem('team_festivita_db',JSON.stringify(festivitaCustom));renderFestivita();aggiornaCalendario();document.getElementById('formNuovaFestivita').reset();toggleSedePatronoForm();}
+function rimuoviFestivita(id){festivitaCustom=festivitaCustom.filter(f=>f.id!==id);localStorage.setItem('team_festivita_db',JSON.stringify(festivitaCustom));renderFestivita();aggiornaCalendario();}
 function popolaAnniIniziali(){const select=document.getElementById('calAnno');const annoCurr=new Date().getFullYear();select.innerHTML='';for(let a=2016;a<=2054;a++){const opt=document.createElement('option');opt.value=a;opt.textContent=a;if(a===annoCurr)opt.selected=true;select.appendChild(opt);}}
 function setModalitaVista(tipo){vistaAttuale=tipo;document.getElementById('btnVistaSettimana').className=tipo==='settimana'?"px-3 py-1.5 text-xs font-bold rounded-l-lg border border-slate-300 bg-blue-600 text-white":"px-3 py-1.5 text-xs font-bold border border-slate-300 bg-white text-slate-700 hover:bg-slate-50";document.getElementById('btnVistaMese').className=tipo==='mese'?"px-3 py-1.5 text-xs font-bold border border-slate-300 bg-blue-600 text-white":"px-3 py-1.5 text-xs font-bold border border-slate-300 bg-white text-slate-700 hover:bg-slate-50";document.getElementById('btnVistaAnnuale').className=tipo==='annuale'?"px-3 py-1.5 text-xs font-bold rounded-r-lg border border-slate-300 bg-blue-600 text-white":"px-3 py-1.5 text-xs font-bold rounded-r-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50";aggiornaVisibilitaFiltriCalendario();aggiornaCalendario();}
 function aggiornaCalendario(){const filtroMSP=document.getElementById('filtroMSP').value;const filtroTesto=(document.getElementById('filtroPersonale').value||'').toLowerCase().trim();let dipFiltro=dipendenti;if(filtroMSP!=='TUTTI')dipFiltro=dipFiltro.filter(d=>d.msp===filtroMSP);if(filtroTesto){dipFiltro=dipFiltro.filter(d=>{const cognome=(d.cognome||'').toLowerCase();const nome=(d.nome||'').toLowerCase();const msp=(d.msp||'').toLowerCase();const nominativo=(d.nominativo||'').toLowerCase();return cognome.includes(filtroTesto)||nome.includes(filtroTesto)||msp.includes(filtroTesto)||nominativo.includes(filtroTesto);});}const container=document.getElementById('contenitoreGrigliaCalendario');container.innerHTML='';if(vistaAttuale==='settimana')renderVistaSettimanale(container,dipFiltro);else if(vistaAttuale==='mese')renderVistaMensile(container,dipFiltro);else if(vistaAttuale==='annuale')renderVistaAnnuale(container,dipFiltro);}
@@ -442,6 +609,7 @@ function confermaCopiaAttivita(e){e.preventDefault();const attId=document.getEle
 function aggiornaDatalistAutocompletamento(){const odmUnici=[...new Set(attivitaCalendario.filter(a=>a.odm&&a.odm.trim()!=='').map(a=>a.odm))];const descUnici=[...new Set(attivitaCalendario.filter(a=>a.desc&&a.desc.trim()!=='').map(a=>a.desc))];const dlODM=document.getElementById('datalistODM');if(dlODM){dlODM.innerHTML=odmUnici.map(v=>`<option value="${v}">`).join('');}const dlDesc=document.getElementById('datalistDescrizione');if(dlDesc){dlDesc.innerHTML=descUnici.map(v=>`<option value="${v}">`).join('');}}
 function esportaDatabaseExcel(){const wb=XLSX.utils.book_new();const datiDip=[["CID","Cognome","Nome","Nominativo","Suffisso_Email","MSP","CdL","Classe","Distaccamento","Pat","TurnoRep","SedeLavoro","Residenza","CellLavoro","CellPrivato","Email","IngressoMS","Quiescenza","DecorrenzaInq","Inq"]];dipendenti.forEach(d=>datiDip.push([formattaCID(d.cid),d.cognome,d.nome,d.nominativo,d.suffisso_email,d.msp,d.cdL,d.classe,d.distaccamento,d.pat,d.turnoRep,d.sedeLavoro,d.residenza,d.cellLavoro,d.cellPrivato,d.email,d.ingressoMS,d.quiescenza,d.decorrenzaInq,d.inq]));XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiDip),"Dipendenti");const datiFest=[["ID","Nome","Giorno","Mese","Tipo","Sede"]];festivitaCustom.forEach(f=>datiFest.push([f.id,f.nome,f.giorno,f.mese,f.tipo,f.sede||'']));XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiFest),"Festivita");const datiAtt=[["ID","CID","Data","Tipo","OdM","Descrizione","Ore","Minuti","OP","OreNorm","MinNorm","OreSpec","MinSpec"]];attivitaCalendario.forEach(a=>datiAtt.push([a.id,formattaCID(a.cid),a.data,a.tipo,a.odm,a.desc,a.ore,a.min,a.op,a.oreNorm||0,a.minNorm||0,a.oreSpec||0,a.minSpec||0]));XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiAtt),"Attivita");const datiTurni=[["Anno","Settimana_ISO","Gruppo_Reperibilita"]];const anniOrdinati=Object.keys(MATRICE_REPERIBILITA).sort((a,b)=>a-b);anniOrdinati.forEach(anno=>{const sequenza=MATRICE_REPERIBILITA[anno];sequenza.forEach((gruppo,indexSettimana)=>{datiTurni.push([parseInt(anno),indexSettimana+1,gruppo]);});});XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiTurni),"Turni_Reperibilita");const datiCons=[["ID","CID","Data","ODM","OP","Ore","Min","OreNorm","MinNorm","OreSpec","MinSpec"]];consuntivazioneData.forEach(c=>datiCons.push([c.id,formattaCID(c.cid),c.data,c.odm,c.op,c.ore,c.min,c.oreNorm||0,c.minNorm||0,c.oreSpec||0,c.minSpec||0]));XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiCons),"Consuntivazione");XLSX.writeFile(wb,"Database_Completo_EM.xlsx");}
 function importaDatabaseExcel(e){const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=function(evt){try{const data=new Uint8Array(evt.target.result);const wb=XLSX.read(data,{type:'array'});if(wb.Sheets["Dipendenti"]){const jsonDip=XLSX.utils.sheet_to_json(wb.Sheets["Dipendenti"],{header:1}).slice(1);if(jsonDip.length>0){dipendenti=jsonDip.map(r=>({cid:formattaCID(String(r[0]||'')),cognome:String(r[1]||''),nome:String(r[2]||''),nominativo:String(r[3]||''),suffisso_email:String(r[4]||''),msp:String(r[5]||''),cdL:String(r[6]||''),classe:String(r[7]||''),distaccamento:String(r[8]||''),pat:String(r[9]||''),turnoRep:String(r[10]||''),sedeLavoro:String(r[11]||''),residenza:String(r[12]||''),cellLavoro:String(r[13]||''),cellPrivato:String(r[14]||''),email:String(r[15]||''),ingressoMS:formattaDataExcel(r[16]),quiescenza:formattaDataExcel(r[17]),decorrenzaInq:formattaDataExcel(r[18]),inq:String(r[19]||'')}));}}if(wb.Sheets["Festivita"]){const jsonFest=XLSX.utils.sheet_to_json(wb.Sheets["Festivita"],{header:1}).slice(1);if(jsonFest.length>0)festivitaCustom=jsonFest.map(r=>({id:String(r[0]||Date.now()),nome:String(r[1]||''),giorno:parseInt(r[2])||1,mese:parseInt(r[3])||0,tipo:String(r[4]||'PATRONO'),sede:String(r[5]||'')}));}if(wb.Sheets["Attivita"]){const jsonAtt=XLSX.utils.sheet_to_json(wb.Sheets["Attivita"],{header:1}).slice(1);if(jsonAtt.length>0)attivitaCalendario=jsonAtt.map(r=>({id:String(r[0]||Date.now()),cid:formattaCID(String(r[1]||'')),data:String(r[2]||''),tipo:String(r[3]||''),odm:String(r[4]||''),desc:String(r[5]||''),ore:parseInt(r[6])||0,min:parseInt(r[7])||0,op:String(r[8]||''),oreNorm:parseInt(r[9])||0,minNorm:parseInt(r[10])||0,oreSpec:parseInt(r[11])||0,minSpec:parseInt(r[12])||0}));}if(wb.Sheets["Turni_Reperibilita"]){const jsonTurni=XLSX.utils.sheet_to_json(wb.Sheets["Turni_Reperibilita"],{header:1}).slice(1);if(jsonTurni.length>0){MATRICE_REPERIBILITA={};jsonTurni.forEach(r=>{const anno=parseInt(r[0]);const settimana=parseInt(r[1]);const gruppo=parseInt(r[2]);if(anno&&settimana&&gruppo){if(!MATRICE_REPERIBILITA[anno])MATRICE_REPERIBILITA[anno]=[];MATRICE_REPERIBILITA[anno][settimana-1]=gruppo;}});}}else{MATRICE_REPERIBILITA=JSON.parse(JSON.stringify(MATRICE_REPERIBILITA_DEFAULT));}if(wb.Sheets["Consuntivazione"]){const jsonCons=XLSX.utils.sheet_to_json(wb.Sheets["Consuntivazione"],{header:1}).slice(1);if(jsonCons.length>0)consuntivazioneData=jsonCons.map(r=>({id:String(r[0]||Date.now()),cid:formattaCID(String(r[1]||'')),data:String(r[2]||''),odm:String(r[3]||''),op:String(r[4]||''),ore:parseInt(r[5])||0,min:parseInt(r[6])||0,oreNorm:parseInt(r[7])||0,minNorm:parseInt(r[8])||0,oreSpec:parseInt(r[9])||0,minSpec:parseInt(r[10])||0}));}
+// ✅ FIX CRITICO: Salvataggio forzato con flag per evitare loop
 window._isWriting=true;
 localStorage.setItem('team_dipendenti_db',JSON.stringify(dipendenti));
 localStorage.setItem('team_festivita_db',JSON.stringify(festivitaCustom));

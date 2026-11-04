@@ -25,7 +25,9 @@ window.auth = firebase.auth();
 
 const FB_KEYS = ['team_dipendenti_db','team_festivita_db','team_attivita_db','team_consuntivazione_db','team_schema_nominativi_db','team_matrice_reperibilita_db'];
 window._listenersRegistered = false;
+window._consuntivazioneInizializzata = false;
 
+// ✅ FIX: Scrivi su Firebase SOLO quando esplicitamente chiamato dall'utente
 window.syncToFirebase = function(key, data) {
     if (!FB_KEYS.includes(key) || !window.db || !window.auth.currentUser) return;
     try {
@@ -43,6 +45,7 @@ window.syncToFirebase = function(key, data) {
     }
 };
 
+// ✅ FIX: Registra snapshot listener SOLO dopo il login
 function registerFirebaseListeners() {
     if (window._listenersRegistered) return;
     window._listenersRegistered = true;
@@ -100,7 +103,13 @@ window.doLogin = function() {
         });
 };
 
-window.doLogout = function() { window.auth.signOut().then(() => location.reload()); };
+window.doLogout = function() { 
+    window.auth.signOut().then(() => {
+        window._listenersRegistered = false;
+        window._consuntivazioneInizializzata = false;
+        location.reload();
+    }); 
+};
 
 window.auth.onAuthStateChanged(async user => {
     if (user) {
@@ -110,8 +119,10 @@ window.auth.onAuthStateChanged(async user => {
         
         console.log('🚀 Utente loggato:', user.email);
         
+        // 1. Registra listener Firebase (solo dopo login)
         registerFirebaseListeners();
         
+        // 2. Leggi da Firebase PRIMA di avviare l'app
         try {
             const promises = FB_KEYS.map(key => 
                 window.db.collection('sync').doc(key).get()
@@ -138,6 +149,7 @@ window.auth.onAuthStateChanged(async user => {
             console.error('❌ Errore lettura Firebase:', e);
         }
         
+        // 3. Avvia app con i dati già caricati
         if(window.startApp) window.startApp();
         
     } else {
@@ -439,12 +451,12 @@ let festInModifica=null;
 let modalitaCID=null;
 let modalitaData=null;
 let modalitaModifica=false;
-window._consuntivazioneInizializzata = false;
 
-// ✅ FIX CRITICO: startApp che NON svuota Firebase
+// ✅ FIX CRITICO: startApp che NON scrive su Firebase
 window.startApp = function() {
     console.log('🚀 Avvio app...');
     
+    // I dati sono già stati caricati da Firebase prima di startApp()
     window.dipendenti = JSON.parse(localStorage.getItem('team_dipendenti_db')) || DIPENDENTI_DEFAULT;
     window.festivitaCustom = JSON.parse(localStorage.getItem('team_festivita_db')) || FESTIVITA_PREDEFINITE;
     window.attivitaCalendario = JSON.parse(localStorage.getItem('team_attivita_db')) || [];
@@ -501,7 +513,7 @@ function esportaSchemaNominativiExcel(){const wb=XLSX.utils.book_new();Object.ke
 function importaSchemaNominativiExcel(e){const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=function(evt){try{const data=new Uint8Array(evt.target.result);const wb=XLSX.read(data,{type:'array'});const fogliTecnici=Object.keys(wb.Sheets).filter(k=>k.startsWith('Tecnici_'));const fogliOperativi=Object.keys(wb.Sheets).filter(k=>k.startsWith('Operativi_'));const tuttiMSP=new Set();fogliTecnici.forEach(k=>tuttiMSP.add(k.replace('Tecnici_','')));fogliOperativi.forEach(k=>tuttiMSP.add(k.replace('Operativi_','')));if(tuttiMSP.size===0){if(wb.Sheets["Tecnici"]){const jsonTecnici=XLSX.utils.sheet_to_json(wb.Sheets["Tecnici"],{header:1}).slice(1);const datiMSP=garantisciStrutturaMSP(mspCorrenteSchema);datiMSP.tecnici=jsonTecnici.map(r=>({gruppo:parseInt(r[0])||1,cid:(r[1]&&String(r[1]).trim()!=='')?formattaCID(String(r[1])):''}));}if(wb.Sheets["Operativi"]){const jsonOperativi=XLSX.utils.sheet_to_json(wb.Sheets["Operativi"],{header:1}).slice(1);const datiMSP=garantisciStrutturaMSP(mspCorrenteSchema);datiMSP.operativi=jsonOperativi.map(r=>({gruppo:parseInt(r[0])||1,cid:(r[1]&&String(r[1]).trim()!=='')?formattaCID(String(r[1])):''}));}}else{tuttiMSP.forEach(msp=>{const datiMSP=garantisciStrutturaMSP(msp);if(wb.Sheets[`Tecnici_${msp}`]){const jsonTecnici=XLSX.utils.sheet_to_json(wb.Sheets[`Tecnici_${msp}`],{header:1}).slice(1);datiMSP.tecnici=jsonTecnici.map(r=>({gruppo:parseInt(r[0])||1,cid:(r[1]&&String(r[1]).trim()!=='')?formattaCID(String(r[1])):''}));}if(wb.Sheets[`Operativi_${msp}`]){const jsonOperativi=XLSX.utils.sheet_to_json(wb.Sheets[`Operativi_${msp}`],{header:1}).slice(1);datiMSP.operativi=jsonOperativi.map(r=>({gruppo:parseInt(r[0])||1,cid:(r[1]&&String(r[1]).trim()!=='')?formattaCID(String(r[1])):''}));}});}localStorage.setItem('team_schema_nominativi_db',JSON.stringify(schemaNominativi));window.syncToFirebase('team_schema_nominativi_db',schemaNominativi);popolaFiltroMSPSchemaNominativi();aggiornaSchemaNominativi();alert("Schema nominativi importato con successo!");}catch(err){alert("Errore lettura Excel: "+err.message);}};reader.readAsArrayBuffer(file);e.target.value='';}
 function stampaSchemaReperibilita(){const anno=document.getElementById('annoSchemaReperibilita').value;document.querySelectorAll('.tab-contenuto').forEach(el=>el.classList.add('hidden'));const container=document.createElement('div');container.className='active-for-print';container.id='containerStampaTemp';const pagina1=document.createElement('div');pagina1.className='pagina-stampa';const caption1=document.createElement('div');caption1.style.cssText='text-align:center;font-size:18px;font-weight:bold;margin-bottom:15px;color:#1e293b;';caption1.textContent=`MS dist. Reggio E. REPERIBILITA' ANNO ${anno}`;pagina1.appendChild(caption1);const schemaClone=document.querySelector('#tabellaSchemaReperibilita').parentElement.cloneNode(true);pagina1.appendChild(schemaClone);container.appendChild(pagina1);const pagina2=document.createElement('div');pagina2.className='pagina-stampa';const titoloTabella=document.createElement('h2');titoloTabella.style.cssText='text-align:center;font-size:18px;font-weight:bold;margin-bottom:15px;color:#1e293b;';titoloTabella.textContent=`SCHEMA NOMINATIVI REPERIBILITÀ - MSP: ${mspCorrenteSchema||'Nessuno'}`;pagina2.appendChild(titoloTabella);if(mspCorrenteSchema&&schemaNominativi[mspCorrenteSchema]){const datiMSP=schemaNominativi[mspCorrenteSchema];const tabTecnici=document.createElement('table');tabTecnici.className='tabella-nominativi';tabTecnici.style.maxWidth='100%';let htmlTecnici='<thead><tr><th colspan="6" class="sezione-header">TECNICI MSP</th></tr>';htmlTecnici+='<tr><th class="col-sq">SQ.</th><th class="col-nominativo">Nominativo</th><th class="col-sede">Sede</th><th class="col-residenza">Residenza</th><th class="col-cell">Cell. Lavoro</th><th class="col-cell">Cell. Privato</th></tr></thead><tbody>';for(let gruppo=1;gruppo<=4;gruppo++){const righeGruppo=datiMSP.tecnici.filter(n=>n.gruppo===gruppo);righeGruppo.slice(0,4).forEach((riga,idx)=>{const dip=(riga.cid&&riga.cid.trim()!=='')?dipendenti.find(d=>d.cid===riga.cid):null;htmlTecnici+=`<tr>${idx===0?`<td class="sq-cell" rowspan="4">${gruppo}</td>`:''}<td>${dip?`${dip.cognome} ${dip.nome}`:''}</td><td>${dip?dip.sedeLavoro:''}</td><td>${dip?dip.residenza:''}</td><td>${dip?dip.cellLavoro:''}</td><td>${dip?dip.cellPrivato:''}</td></tr>`;});if(gruppo<4)htmlTecnici+='<tr class="riga-separatore"><td colspan="6"></td></tr>';}htmlTecnici+='</tbody>';tabTecnici.innerHTML=htmlTecnici;pagina2.appendChild(tabTecnici);const spacer=document.createElement('div');spacer.style.height='20px';pagina2.appendChild(spacer);const tabOperativi=document.createElement('table');tabOperativi.className='tabella-nominativi';tabOperativi.style.maxWidth='100%';let htmlOperativi='<thead><tr><th colspan="6" class="sezione-header">OPERATIVI MSP</th></tr>';htmlOperativi+='<tr><th class="col-sq">SQ.</th><th class="col-nominativo">Nominativo</th><th class="col-sede">Sede</th><th class="col-residenza">Residenza</th><th class="col-cell">Cell. Lavoro</th><th class="col-cell">Cell. Privato</th></tr></thead><tbody>';for(let gruppo=1;gruppo<=4;gruppo++){const righeGruppo=datiMSP.operativi.filter(n=>n.gruppo===gruppo);righeGruppo.slice(0,6).forEach((riga,idx)=>{const dip=(riga.cid&&riga.cid.trim()!=='')?dipendenti.find(d=>d.cid===riga.cid):null;htmlOperativi+=`<tr>${idx===0?`<td class="sq-cell" rowspan="6">${gruppo}</td>`:''}<td>${dip?`${dip.cognome} ${dip.nome}`:''}</td><td>${dip?dip.sedeLavoro:''}</td><td>${dip?dip.residenza:''}</td><td>${dip?dip.cellLavoro:''}</td><td>${dip?dip.cellPrivato:''}</td></tr>`;});if(gruppo<4)htmlOperativi+='<tr class="riga-separatore"><td colspan="6"></td></tr>';}htmlOperativi+='</tbody>';tabOperativi.innerHTML=htmlOperativi;pagina2.appendChild(tabOperativi);}else{pagina2.innerHTML+='<p class="text-center text-slate-500 italic">Nessun dato disponibile per l\'MSP selezionato.</p>';}container.appendChild(pagina2);document.body.appendChild(container);setTimeout(()=>{window.print();setTimeout(()=>{const tempContainer=document.getElementById('containerStampaTemp');if(tempContainer)document.body.removeChild(tempContainer);cambiaTab('reperibilita');},500);},300);}
 
-// ✅ FIX: popolaFiltriConsuntivazione NON svuota più i dati esistenti
+// ✅ FIX: popolaFiltriConsuntivazione NON svuota più i dati
 function popolaFiltriConsuntivazione(){
     const oggi=new Date();
     const annoCorrente=oggi.getFullYear();
@@ -659,6 +671,7 @@ function cambiaTab(tabId){
 
 function aggiornaVisibilitaFiltriCalendario(){const controlliNav=document.getElementById('controlliNavigazione');const filtroAnno=document.getElementById('filtroAnnoGroup');const filtroMese=document.getElementById('filtroMeseGroup');const filtroMSP=document.getElementById('filtroMSPGroup');const filtroCerca=document.getElementById('filtroCercaGroup');const pulsantiExcel=document.getElementById('pulsantiExcelCalendario');if(vistaAttuale==='annuale'){if(controlliNav)controlliNav.style.display='none';if(filtroAnno)filtroAnno.style.display='flex';if(filtroMese)filtroMese.style.display='none';if(filtroMSP)filtroMSP.style.display='none';if(filtroCerca)filtroCerca.style.display='none';if(pulsantiExcel)pulsantiExcel.classList.remove('hidden');}else if(vistaAttuale==='mese'){if(controlliNav)controlliNav.style.display='none';if(filtroAnno)filtroAnno.style.display='flex';if(filtroMese)filtroMese.style.display='flex';if(filtroMSP)filtroMSP.style.display='flex';if(filtroCerca)filtroCerca.style.display='none';if(pulsantiExcel)pulsantiExcel.classList.add('hidden');}else{if(controlliNav)controlliNav.style.display='flex';if(filtroAnno)filtroAnno.style.display='flex';if(filtroMese)filtroMese.style.display='flex';if(filtroMSP)filtroMSP.style.display='flex';if(filtroCerca)filtroCerca.style.display='flex';if(pulsantiExcel)pulsantiExcel.classList.add('hidden');}}
 
+// ✅ FIX: renderDipendenti SENZA syncToFirebase
 function renderDipendenti(){
     const tbody=document.getElementById('tabellaDipendenti');
     if(!tbody)return;
@@ -690,6 +703,7 @@ function salvaModificaDipendente(e){e.preventDefault();const oldCid=document.get
 function aggiungiDipendente(e){e.preventDefault();const cid=formattaCID(document.getElementById('addCID').value.trim());if(dipendenti.some(x=>x.cid===cid))return alert("CID già presente.");const cognome=document.getElementById('addCognome').value.trim();const nome=document.getElementById('addNome').value.trim();dipendenti.push({cid:cid,cognome:cognome,nome:nome,nominativo:(cognome+' '+nome).toUpperCase(),suffisso_email:document.getElementById('addSuffisso').value.trim(),msp:document.getElementById('addMSP').value.trim().toUpperCase(),cdL:document.getElementById('addCdL').value.trim().toUpperCase(),classe:document.getElementById('addClasse').value,distaccamento:document.getElementById('addDistaccamento').value.trim().toUpperCase(),pat:document.getElementById('addPat').value,turnoRep:document.getElementById('addTurnoRep').value,sedeLavoro:document.getElementById('addSedeLavoro').value,residenza:document.getElementById('addResidenza').value.trim(),cellLavoro:document.getElementById('addCellLavoro').value.trim(),cellPrivato:document.getElementById('addCellPrivato').value.trim(),email:document.getElementById('addEmail').value.trim(),ingressoMS:document.getElementById('addIngressoMS').value.trim(),quiescenza:document.getElementById('addQuiescenza').value.trim(),decorrenzaInq:document.getElementById('addDecorrenzaInq').value.trim(),inq:document.getElementById('addInq').value.trim()});localStorage.setItem('team_dipendenti_db',JSON.stringify(dipendenti));window.syncToFirebase('team_dipendenti_db',dipendenti);renderDipendenti();popolaFiltroMSP();document.getElementById('formNuovoDipendente').reset();popolaFiltroMSPSchemaNominativi();aggiornaSchemaNominativi();aggiornaDatalistAutocompletamento();}
 function rimuoviDipendente(cid){if(confirm(`Rimuovere dipendente CID ${cid}?`)){dipendenti=dipendenti.filter(x=>x.cid!==cid);localStorage.setItem('team_dipendenti_db',JSON.stringify(dipendenti));window.syncToFirebase('team_dipendenti_db',dipendenti);renderDipendenti();popolaFiltroMSP();popolaFiltroMSPSchemaNominativi();aggiornaSchemaNominativi();aggiornaDatalistAutocompletamento();}}
 
+// ✅ FIX: renderFestivita SENZA syncToFirebase
 function renderFestivita(){
     const tbody=document.getElementById('tabellaFestivita');
     tbody.innerHTML='';

@@ -12,7 +12,7 @@ const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzteI5iJ4k0PV
 const APP_PASSWORD = "teamemr2024";
 
 window._isInitializing = true;
-window.odmDatabase = {}; // ✅ Database OdM caricato da Excel
+window.odmDatabase = {};
 
 let dbData = {
     team_dipendenti_db: [],
@@ -59,7 +59,7 @@ function ordinaDipendenti(lista) {
     });
 }
 
-// ✅ NUOVA FUNZIONE: Carica file OdM Excel
+// ✅ FUNZIONE: Carica file OdM Excel
 function caricaFileOdM(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -72,37 +72,36 @@ function caricaFileOdM(event) {
             const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
             const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
             
-            // Costruisci dizionario: { "OdM_OP": { unita, stSis, ... } }
             window.odmDatabase = {};
             let count = 0;
             
-            // Salta l'intestazione (prima riga)
             for (let i = 1; i < jsonData.length; i++) {
                 const row = jsonData[i];
-                if (row.length >= 6) {
-                    const odm = String(row[0] || '').trim();
-                    const op = String(row[2] || '').trim();
-                    const unita = String(row[4] || '').trim();
-                    const stSis = String(row[5] || '').trim();
-                    
-                    if (odm && op) {
-                        const key = `${odm}_${op}`;
-                        window.odmDatabase[key] = {
-                            odm: odm,
-                            op: op,
-                            unita: unita,
-                            stSis: stSis,
-                            valido: stSis.toUpperCase() !== 'APER'
-                        };
-                        count++;
-                    }
+                if (!row || row.length < 6) continue;
+                
+                const odm = String(row[0] || '').trim();
+                const op = String(row[2] || '').trim();
+                const unita = String(row[4] || '').trim();
+                const stSis = String(row[5] || '').trim();
+                
+                if (odm && op && odm !== 'OdM' && !isNaN(parseInt(odm))) {
+                    const key = `${odm}_${op}`;
+                    window.odmDatabase[key] = {
+                        odm: odm,
+                        op: op,
+                        unita: unita,
+                        stSis: stSis,
+                        valido: stSis.toUpperCase() !== 'APER'
+                    };
+                    count++;
                 }
             }
             
             console.log(`✅ Database OdM caricato: ${count} record`);
             alert(`✅ Database OdM caricato con successo!\n${count} ordini di manutenzione importati.`);
             
-            // Aggiorna la tabella CAPEX se visibile
+            aggiornaContatoreOdM();
+            
             if (!document.getElementById('sezione-consuntivazione').classList.contains('hidden')) {
                 aggiornaConsuntivazione();
             }
@@ -115,26 +114,47 @@ function caricaFileOdM(event) {
     event.target.value = '';
 }
 
-// ✅ NUOVA FUNZIONE: Valida un OdM
+// ✅ FUNZIONE: Valida un OdM
 function validaOdM(odm, op, cdlDipendente) {
-    if (!odm || !op) return { valido: false, motivo: 'OdM o OP mancanti' };
-    
-    const key = `${String(odm).trim()}_${String(op).trim()}`;
-    const record = window.odmDatabase[key];
-    
-    if (!record) {
-        return { valido: false, motivo: 'OdM non trovato nel database' };
+    if (!odm || odm.trim() === '') {
+        return { valido: true, motivo: 'Nessun OdM inserito', tipo: 'info' };
+    }
+    if (!op || op.trim() === '') {
+        return { valido: false, motivo: 'Operazione (OP) mancante', tipo: 'errore' };
     }
     
-    if (record.unita !== cdlDipendente) {
-        return { valido: false, motivo: `C.d.L. errato (atteso: ${record.unita}, trovato: ${cdlDipendente})` };
+    const odmClean = String(odm).trim();
+    const opClean = String(op).trim();
+    const key = `${odmClean}_${opClean}`;
+    const record = window.odmDatabase[key];
+    
+    if (Object.keys(window.odmDatabase).length === 0) {
+        return { valido: true, motivo: 'Database OdM non caricato', tipo: 'warning' };
+    }
+    
+    if (!record) {
+        return { valido: false, motivo: `OdM ${odmClean} OP ${opClean} non trovato nel database`, tipo: 'errore' };
+    }
+    
+    if (record.unita && cdlDipendente && record.unita.toUpperCase() !== cdlDipendente.toUpperCase()) {
+        return { valido: false, motivo: `C.d.L. errato: atteso ${record.unita}, trovato ${cdlDipendente}`, tipo: 'errore' };
     }
     
     if (!record.valido) {
-        return { valido: false, motivo: `Stato APER (non conuntivabile)` };
+        return { valido: false, motivo: `Stato APER (non consuntivabile) - Stato: ${record.stSis}`, tipo: 'errore' };
     }
     
-    return { valido: true, motivo: 'OK' };
+    return { valido: true, motivo: `OK - Stato: ${record.stSis}`, tipo: 'ok' };
+}
+
+function aggiornaContatoreOdM() {
+    const count = Object.keys(window.odmDatabase).length;
+    const indicator = document.getElementById('odmStatusIndicator');
+    const countEl = document.getElementById('odmCount');
+    if (indicator && countEl) {
+        countEl.textContent = `${count} record caricati`;
+        indicator.classList.remove('hidden');
+    }
 }
 
 async function loadDataFromSheets() {
@@ -299,7 +319,7 @@ async function saveDataToSheets(key, data) {
 @media(max-width:768px){.header-mese-schema{font-size:12px;padding:5px 6px}.cella-giorno-numero{font-size:10px}.cella-giorno-nome{font-size:8px}.cella-gruppo-reperibilita{font-size:10px}.header-giorno{font-size:10px;padding:2px 1px}.schema-reperibilita-table{min-width:700px}}
 @media print{body{background:white!important}header,.btn-tab,button,label,input[type="file"],.no-print,nav,#modalAttivita,#modalCopiaAttivita,#modalModificaDip,.report-actions,.report-filters,#loginOverlay{display:none!important}main{max-width:100%!important;margin:0!important;padding:0!important}.tab-contenuto{display:none!important}.tab-contenuto.active-for-print{display:block!important;position:static!important;width:100%;height:auto;background:white;z-index:9999;padding:10px;overflow:visible}.bg-white{box-shadow:none!important;border:none!important}@page{size:landscape;margin:1cm}.schema-reperibilita-table{min-width:auto;width:100%}.pagina-stampa{page-break-after:always;padding:10px}.pagina-stampa:last-child{page-break-after:auto}.tabella-nominativi{max-width:100%!important}.container-tabelle-rep{grid-template-columns:1fr 1fr;gap:10px}.summary-card,.report-table th,.report-table tfoot td{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}}
 
-/* ✅ NUOVI STILI per evidenziazione OdM */
+/* ✅ STILI per validazione OdM */
 .riga-odm-errore {
     background-color: #fee2e2 !important;
     border-left: 4px solid #dc2626 !important;
@@ -311,13 +331,11 @@ async function saveDataToSheets(key, data) {
     display: inline-block;
     margin-left: 4px;
     font-size: 12px;
+    vertical-align: middle;
 }
-.icona-validazione.ok {
-    color: #10b981;
-}
-.icona-validazione.errore {
-    color: #dc2626;
-}
+.icona-validazione.ok { color: #10b981; }
+.icona-validazione.errore { color: #dc2626; }
+.icona-validazione.warning { color: #f59e0b; }
 .tooltip-odm {
     position: relative;
     cursor: help;
@@ -336,6 +354,7 @@ async function saveDataToSheets(key, data) {
     white-space: nowrap;
     z-index: 1000;
     box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    pointer-events: none;
 }
 </style>
 </head>
@@ -433,9 +452,9 @@ async function saveDataToSheets(key, data) {
 </div>
 <div id="consInfoPeriodo" class="mb-3 bg-blue-50 border-l-4 border-blue-500 p-3 rounded-r text-xs"></div>
 
-<!-- ✅ NUOVO: Indicatore stato database OdM -->
+<!-- ✅ Indicatore stato database OdM -->
 <div id="odmStatusIndicator" class="mb-3 bg-amber-50 border-l-4 border-amber-500 p-3 rounded-r text-xs hidden">
-<div class="flex items-center gap-2">
+<div class="flex items-center gap-2 flex-wrap">
 <i class="fa-solid fa-database text-amber-600"></i>
 <span class="font-bold text-amber-900">Database OdM:</span>
 <span id="odmCount" class="text-amber-800">0 record caricati</span>
@@ -511,7 +530,7 @@ async function saveDataToSheets(key, data) {
 </main>
 </div>
 
-<!-- I modali rimangono invariati -->
+<!-- Modali (invariati) -->
 <div id="modalAttivita" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden flex items-center justify-center z-50 p-4"><div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-5 border border-slate-200 space-y-4 modal-scroll"><div class="flex justify-between items-center border-b pb-2"><h3 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-calendar-plus text-blue-600"></i> <span id="modalTitolo">Assegna Attività</span></h3><button type="button" onclick="chiudiModalAttivita()" class="text-slate-400 hover:text-slate-600 text-lg"><i class="fa-solid fa-xmark"></i></button></div><div class="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs space-y-1"><div><strong>Dipendente:</strong> <span id="mNomeDip" class="text-blue-700 font-bold">---</span></div><div><strong>Data:</strong> <span id="mData" class="text-slate-700 font-semibold">---</span> | <strong>Sede:</strong> <span id="mSede" class="font-bold text-amber-800">---</span></div><div id="mInfoReperibAuto" class="text-[11px] font-bold text-rose-700 pt-1"></div></div><div><label class="block text-xs font-bold text-slate-600 uppercase mb-2">Inserimenti ed Eccezioni del Giorno:</label><div id="mListaAttivita" class="space-y-2 max-h-40 overflow-y-auto p-1"></div></div><form id="formNuovaAttivita" onsubmit="salvaAttivitaModal(event)" class="border-t pt-3 space-y-3"><input type="hidden" id="modificaAttId" value=""><div class="grid grid-cols-2 gap-2"><div><label class="block text-[11px] font-bold text-slate-600 uppercase">Causale / Tipo *</label><select id="mTipo" onchange="toggleFormTipoModal()" class="w-full border rounded px-2 py-1 text-xs font-bold"><option value="ODM">Lavoro con OdM</option><option value="FE">FE - Ferie</option><option value="MA">MA - Malattia</option><option value="RC">RC - Riposo Compensativo</option><option value="RF">RF - Riposo Fisiologico</option><option value="FA">FA - Ex Festività</option><option value="REPERIBILE_ADD">Aggiungi Reperibilità</option><option value="REPERIBILE_DEL">CANCELLA Reperibilità</option></select></div><div id="boxODM"><label class="block text-[11px] font-bold text-slate-600 uppercase">OdM / NTW *</label><input type="text" id="mODM" placeholder="4001234567" class="w-full border rounded px-2 py-1 text-xs font-semibold" list="datalistODM" autocomplete="on"></div></div><div id="boxDescrizione"><label class="block text-[11px] font-bold text-slate-600 uppercase">Descrizione / Note</label><input type="text" id="mDescrizione" class="w-full border rounded px-2 py-1 text-xs font-semibold" list="datalistDescrizione" autocomplete="on"></div><div id="boxDurata" class="grid grid-cols-2 gap-2"><div><label class="block text-[11px] font-bold text-slate-600 uppercase">Durata Ore / Minuti *</label><div class="flex items-center gap-1"><input type="number" id="mOre" min="0" max="24" value="7" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"><span class="font-bold text-slate-400">:</span><input type="number" id="mMin" min="0" max="59" value="36" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"></div></div><div id="boxOP"><label class="block text-[11px] font-bold text-slate-600 uppercase">Operazione (OP)</label><input type="text" id="mOP" value="0010" class="w-full border rounded px-2 py-1 text-xs font-semibold"></div></div><div id="boxOreSpeciali" class="grid grid-cols-2 gap-2 bg-blue-50 p-2 rounded border border-blue-200"><div><label class="block text-[11px] font-bold text-blue-800 uppercase">Ore Norm / Min Norm</label><div class="flex items-center gap-1"><input type="number" id="mOreNorm" min="0" max="24" value="0" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"><span class="font-bold text-slate-400">:</span><input type="number" id="mMinNorm" min="0" max="59" value="0" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"></div></div><div><label class="block text-[11px] font-bold text-purple-800 uppercase">Ore Spec / Min Spec</label><div class="flex items-center gap-1"><input type="number" id="mOreSpec" min="0" max="24" value="0" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"><span class="font-bold text-slate-400">:</span><input type="number" id="mMinSpec" min="0" max="59" value="0" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"></div></div><div class="col-span-2 text-[11px] text-slate-600 italic" id="mValidazioneOre"></div></div><div class="flex justify-end gap-2 pt-2"><button type="button" onclick="chiudiModalAttivita()" class="px-3 py-1.5 rounded text-xs font-semibold bg-slate-200 text-slate-700 hover:bg-slate-300">Chiudi</button><button type="submit" class="px-4 py-1.5 rounded text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 shadow" id="btnSalvaAttivita">Applica</button></div></form></div></div>
 
 <div id="modalCopiaAttivita" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden flex items-center justify-center z-[60] p-4"><div class="bg-white rounded-xl shadow-2xl max-w-md w-full p-5 border border-slate-200 space-y-4"><div class="flex justify-between items-center border-b pb-2"><h3 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-copy text-blue-600"></i> Copia Attività</h3><button type="button" onclick="chiudiModalCopia()" class="text-slate-400 hover:text-slate-600 text-lg"><i class="fa-solid fa-xmark"></i></button></div><div class="bg-blue-50 p-3 rounded-lg border border-blue-200 text-xs"><div><strong>Attività originale:</strong> <span id="copiaInfoAtt" class="text-blue-700 font-bold">---</span></div><div><strong>Data:</strong> <span id="copiaInfoData" class="text-slate-700 font-semibold">---</span></div></div><form id="formCopiaAttivita" onsubmit="confermaCopiaAttivita(event)" class="space-y-3"><input type="hidden" id="copiaAttId"><div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Nuova Data *</label><input type="date" id="copiaNuovaData" required class="w-full border rounded px-2 py-1 text-xs font-bold"></div><div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Nuovo Dipendente (opzionale)</label><select id="copiaNuovoDip" class="w-full border rounded px-2 py-1 text-xs font-bold"><option value="">-- Mantieni stesso dipendente --</option></select></div><div class="flex items-center gap-2"><input type="checkbox" id="copiaEliminaOriginale" class="rounded"><label for="copiaEliminaOriginale" class="text-xs font-semibold text-slate-700">Elimina attività originale dopo la copia</label></div><div class="flex justify-end gap-2 pt-2"><button type="button" onclick="chiudiModalCopia()" class="px-3 py-1.5 rounded text-xs font-semibold bg-slate-200 text-slate-700 hover:bg-slate-300">Annulla</button><button type="submit" class="px-4 py-1.5 rounded text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 shadow">Copia</button></div></form></div></div>
@@ -571,16 +590,9 @@ window.startApp = function() {
     if (typeof aggiornaSchemaNominativi === 'function') aggiornaSchemaNominativi();
     if (typeof cambiaTab === 'function') cambiaTab('calendario');
     
-    // ✅ Mostra indicatore OdM
     document.getElementById('odmStatusIndicator').classList.remove('hidden');
     aggiornaContatoreOdM();
 };
-
-// ✅ NUOVA FUNZIONE: Aggiorna contatore OdM
-function aggiornaContatoreOdM() {
-    const count = Object.keys(window.odmDatabase).length;
-    document.getElementById('odmCount').textContent = `${count} record caricati`;
-}
 
 window.syncToFirebase = function(key, data) { saveDataToSheets(key, data); };
 
@@ -828,6 +840,7 @@ function aggiornaConsuntivazione(){
     importaDaCalendario(true);
 }
 
+// ✅ FUNZIONE MODIFICATA: renderTabellaConsuntivazione con validazione OdM
 function renderTabellaConsuntivazione(anno,mese,settimana,cdl,msp,tipoReport){
     const tbody=document.getElementById('tabellaConsuntivazione');
     const tfoot=document.getElementById('piedeConsuntivazione');
@@ -837,6 +850,8 @@ function renderTabellaConsuntivazione(anno,mese,settimana,cdl,msp,tipoReport){
     if(dipFiltrati.length===0){tbody.innerHTML='<tr><td colspan="16" class="p-4 text-center text-slate-500 italic">Nessun dipendente trovato con i filtri selezionati.</td></tr>';return;}
     const attivitaSettimana=consuntivazioneData.filter(a=>{const dataAtt=parseLocalDate(a.data);return dataInSettimana(dataAtt,settimana);});
     let totaleOre=0,totaleMin=0,totaleOreNorm=0,totaleMinNorm=0,totaleOreSpec=0,totaleMinSpec=0;
+    let righeValide=0, righeErrore=0, righeWarning=0;
+    
     dipFiltrati.forEach(dip=>{
         const attDip=attivitaSettimana.filter(a=>a.cid===dip.cid);
         if(attDip.length===0){
@@ -852,14 +867,23 @@ function renderTabellaConsuntivazione(anno,mese,settimana,cdl,msp,tipoReport){
                 // ✅ VALIDAZIONE OdM
                 let validazioneOdM = '';
                 let classeRiga = '';
-                if (att.tipo === 'ODM' && att.odm && att.op) {
+                const hasOdM = att.odm && String(att.odm).trim() !== '';
+                
+                if (hasOdM && Object.keys(window.odmDatabase).length > 0) {
                     const validazione = validaOdM(att.odm, att.op, dip.cdL);
-                    if (validazione.valido) {
-                        validazioneOdM = '<i class="fa-solid fa-circle-check icona-validazione ok" title="OdM valido"></i>';
+                    if (validazione.tipo === 'ok') {
+                        validazioneOdM = '<i class="fa-solid fa-circle-check icona-validazione ok" title="OdM valido: '+validazione.motivo+'"></i>';
+                        righeValide++;
+                    } else if (validazione.tipo === 'warning') {
+                        validazioneOdM = '<i class="fa-solid fa-triangle-exclamation icona-validazione warning tooltip-odm" data-tooltip="'+validazione.motivo+'" title="'+validazione.motivo+'"></i>';
+                        righeWarning++;
                     } else {
-                        validazioneOdM = `<i class="fa-solid fa-circle-xmark icona-validazione errore tooltip-odm" data-tooltip="${validazione.motivo}" title="${validazione.motivo}"></i>`;
+                        validazioneOdM = '<i class="fa-solid fa-circle-xmark icona-validazione errore tooltip-odm" data-tooltip="'+validazione.motivo+'" title="'+validazione.motivo+'"></i>';
                         classeRiga = 'riga-odm-errore';
+                        righeErrore++;
                     }
+                } else if (hasOdM && Object.keys(window.odmDatabase).length === 0) {
+                    validazioneOdM = '<i class="fa-solid fa-circle-info icona-validazione" style="color:#94a3b8" title="Carica il database OdM per la validazione"></i>';
                 }
                 
                 if (classeRiga) tr.classList.add(classeRiga);
@@ -875,6 +899,26 @@ function renderTabellaConsuntivazione(anno,mese,settimana,cdl,msp,tipoReport){
             });
         }
     });
+    
+    // ✅ Aggiorna indicatore con riepilogo validazione
+    const dbCount = Object.keys(window.odmDatabase).length;
+    if (dbCount > 0) {
+        document.getElementById('odmStatusIndicator').innerHTML = `
+            <div class="flex items-center gap-2 flex-wrap">
+                <i class="fa-solid fa-database text-amber-600"></i>
+                <span class="font-bold text-amber-900">Database OdM:</span>
+                <span class="text-amber-800">${dbCount} record caricati</span>
+                <span class="ml-2 px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-xs font-bold">✅ ${righeValide} validi</span>
+                ${righeWarning > 0 ? `<span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800 text-xs font-bold">⚠️ ${righeWarning} warning</span>` : ''}
+                ${righeErrore > 0 ? `<span class="px-2 py-0.5 rounded bg-red-100 text-red-800 text-xs font-bold">❌ ${righeErrore} errori</span>` : ''}
+                <label class="ml-auto bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1 rounded text-xs shadow transition cursor-pointer flex items-center gap-1">
+                    <i class="fa-solid fa-file-import"></i> Carica OdM Excel
+                    <input type="file" id="inputFileOdM" accept=".xlsx" class="hidden" onchange="caricaFileOdM(event)">
+                </label>
+            </div>
+        `;
+    }
+    
     const totaleMinuti=totaleOre*60+totaleMin;
     const hTotali=Math.floor(totaleMinuti/60);
     const mTotali=totaleMinuti%60;

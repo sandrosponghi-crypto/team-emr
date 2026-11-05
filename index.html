@@ -8,11 +8,11 @@
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <script>
-// ✅ URL Google Apps Script definitivo
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzteI5iJ4k0PVtZecxdk2l1Wt8LTyQQqy0FmtfGBwP2lmAK9VnnnymOEfUwBvOGOoRvmQ/exec";
 const APP_PASSWORD = "teamemr2024";
 
 window._isInitializing = true;
+window.odmDatabase = {}; // ✅ Database OdM caricato da Excel
 
 let dbData = {
     team_dipendenti_db: [],
@@ -25,7 +25,6 @@ let dbData = {
 
 window.isLoadingData = false;
 
-// ✅ FIX FUSO ORARIO: Converte Date in stringa YYYY-MM-DD nel fuso orario locale
 function dataLocaleToString(d) {
     if (!d) return '';
     const anno = d.getFullYear();
@@ -34,7 +33,6 @@ function dataLocaleToString(d) {
     return `${anno}-${mese}-${giorno}`;
 }
 
-// ✅ FIX FUSO ORARIO: Converte stringa YYYY-MM-DD in Date senza slittamenti UTC
 function parseLocalDate(dateStr) {
     if (!dateStr) return null;
     const parts = dateStr.split('-');
@@ -44,29 +42,99 @@ function parseLocalDate(dateStr) {
     return new Date(dateStr);
 }
 
-// ✅ ORDINAMENTO UNIFORME: DIST., Sede, Cognome, Nome
 function ordinaDipendenti(lista) {
     return [...lista].sort((a, b) => {
-        // 1. DISTACCAMENTO
         const distA = (a.distaccamento || '').toUpperCase();
         const distB = (b.distaccamento || '').toUpperCase();
         if (distA !== distB) return distA.localeCompare(distB, 'it');
-        
-        // 2. SEDE
         const sedeA = (a.sedeLavoro || '').toUpperCase();
         const sedeB = (b.sedeLavoro || '').toUpperCase();
         if (sedeA !== sedeB) return sedeA.localeCompare(sedeB, 'it');
-        
-        // 3. COGNOME
         const cognA = (a.cognome || '').toUpperCase();
         const cognB = (b.cognome || '').toUpperCase();
         if (cognA !== cognB) return cognA.localeCompare(cognB, 'it');
-        
-        // 4. NOME
         const nomeA = (a.nome || '').toUpperCase();
         const nomeB = (b.nome || '').toUpperCase();
         return nomeA.localeCompare(nomeB, 'it');
     });
+}
+
+// ✅ NUOVA FUNZIONE: Carica file OdM Excel
+function caricaFileOdM(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+            const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+            
+            // Costruisci dizionario: { "OdM_OP": { unita, stSis, ... } }
+            window.odmDatabase = {};
+            let count = 0;
+            
+            // Salta l'intestazione (prima riga)
+            for (let i = 1; i < jsonData.length; i++) {
+                const row = jsonData[i];
+                if (row.length >= 6) {
+                    const odm = String(row[0] || '').trim();
+                    const op = String(row[2] || '').trim();
+                    const unita = String(row[4] || '').trim();
+                    const stSis = String(row[5] || '').trim();
+                    
+                    if (odm && op) {
+                        const key = `${odm}_${op}`;
+                        window.odmDatabase[key] = {
+                            odm: odm,
+                            op: op,
+                            unita: unita,
+                            stSis: stSis,
+                            valido: stSis.toUpperCase() !== 'APER'
+                        };
+                        count++;
+                    }
+                }
+            }
+            
+            console.log(`✅ Database OdM caricato: ${count} record`);
+            alert(`✅ Database OdM caricato con successo!\n${count} ordini di manutenzione importati.`);
+            
+            // Aggiorna la tabella CAPEX se visibile
+            if (!document.getElementById('sezione-consuntivazione').classList.contains('hidden')) {
+                aggiornaConsuntivazione();
+            }
+        } catch (error) {
+            console.error('❌ Errore lettura file OdM:', error);
+            alert('❌ Errore durante la lettura del file OdM. Verifica il formato.');
+        }
+    };
+    reader.readAsArrayBuffer(file);
+    event.target.value = '';
+}
+
+// ✅ NUOVA FUNZIONE: Valida un OdM
+function validaOdM(odm, op, cdlDipendente) {
+    if (!odm || !op) return { valido: false, motivo: 'OdM o OP mancanti' };
+    
+    const key = `${String(odm).trim()}_${String(op).trim()}`;
+    const record = window.odmDatabase[key];
+    
+    if (!record) {
+        return { valido: false, motivo: 'OdM non trovato nel database' };
+    }
+    
+    if (record.unita !== cdlDipendente) {
+        return { valido: false, motivo: `C.d.L. errato (atteso: ${record.unita}, trovato: ${cdlDipendente})` };
+    }
+    
+    if (!record.valido) {
+        return { valido: false, motivo: `Stato APER (non conuntivabile)` };
+    }
+    
+    return { valido: true, motivo: 'OK' };
 }
 
 async function loadDataFromSheets() {
@@ -230,6 +298,45 @@ async function saveDataToSheets(key, data) {
 @media(max-width:1200px){.header-mese-schema{font-size:13px;padding:6px 7px}.cella-giorno-numero{font-size:11px}.cella-giorno-nome{font-size:9px}.cella-gruppo-reperibilita{font-size:11px}.header-giorno{font-size:11px;padding:3px 2px}}
 @media(max-width:768px){.header-mese-schema{font-size:12px;padding:5px 6px}.cella-giorno-numero{font-size:10px}.cella-giorno-nome{font-size:8px}.cella-gruppo-reperibilita{font-size:10px}.header-giorno{font-size:10px;padding:2px 1px}.schema-reperibilita-table{min-width:700px}}
 @media print{body{background:white!important}header,.btn-tab,button,label,input[type="file"],.no-print,nav,#modalAttivita,#modalCopiaAttivita,#modalModificaDip,.report-actions,.report-filters,#loginOverlay{display:none!important}main{max-width:100%!important;margin:0!important;padding:0!important}.tab-contenuto{display:none!important}.tab-contenuto.active-for-print{display:block!important;position:static!important;width:100%;height:auto;background:white;z-index:9999;padding:10px;overflow:visible}.bg-white{box-shadow:none!important;border:none!important}@page{size:landscape;margin:1cm}.schema-reperibilita-table{min-width:auto;width:100%}.pagina-stampa{page-break-after:always;padding:10px}.pagina-stampa:last-child{page-break-after:auto}.tabella-nominativi{max-width:100%!important}.container-tabelle-rep{grid-template-columns:1fr 1fr;gap:10px}.summary-card,.report-table th,.report-table tfoot td{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}}
+
+/* ✅ NUOVI STILI per evidenziazione OdM */
+.riga-odm-errore {
+    background-color: #fee2e2 !important;
+    border-left: 4px solid #dc2626 !important;
+}
+.riga-odm-errore td {
+    background-color: #fee2e2 !important;
+}
+.icona-validazione {
+    display: inline-block;
+    margin-left: 4px;
+    font-size: 12px;
+}
+.icona-validazione.ok {
+    color: #10b981;
+}
+.icona-validazione.errore {
+    color: #dc2626;
+}
+.tooltip-odm {
+    position: relative;
+    cursor: help;
+}
+.tooltip-odm:hover::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1e293b;
+    color: white;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    white-space: nowrap;
+    z-index: 1000;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
 </style>
 </head>
 <body class="bg-slate-50 min-h-screen text-slate-800 font-sans pb-12">
@@ -325,6 +432,20 @@ async function saveDataToSheets(key, data) {
 <div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Tipo Report</label><select id="consTipoReport" onchange="aggiornaConsuntivazione()" class="w-full border rounded px-2 py-1 text-xs font-bold"><option value="I">Impiegati (I)</option><option value="Q">Quadri (Q)</option></select></div>
 </div>
 <div id="consInfoPeriodo" class="mb-3 bg-blue-50 border-l-4 border-blue-500 p-3 rounded-r text-xs"></div>
+
+<!-- ✅ NUOVO: Indicatore stato database OdM -->
+<div id="odmStatusIndicator" class="mb-3 bg-amber-50 border-l-4 border-amber-500 p-3 rounded-r text-xs hidden">
+<div class="flex items-center gap-2">
+<i class="fa-solid fa-database text-amber-600"></i>
+<span class="font-bold text-amber-900">Database OdM:</span>
+<span id="odmCount" class="text-amber-800">0 record caricati</span>
+<label class="ml-auto bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1 rounded text-xs shadow transition cursor-pointer flex items-center gap-1">
+<i class="fa-solid fa-file-import"></i> Carica OdM Excel
+<input type="file" id="inputFileOdM" accept=".xlsx" class="hidden" onchange="caricaFileOdM(event)">
+</label>
+</div>
+</div>
+
 <div class="overflow-x-auto border border-slate-200 rounded-lg mb-4"><table class="w-full text-left border-collapse text-xs"><thead><tr class="bg-slate-800 text-white uppercase font-bold"><th class="p-2 border-r border-slate-700">CID</th><th class="p-2 border-r border-slate-700">Cognome Nome</th><th class="p-2 border-r border-slate-700">C.D.L.</th><th class="p-2 border-r border-slate-700">Data</th><th class="p-2 border-r border-slate-700">ODM/NTW</th><th class="p-2 border-r border-slate-700">Operazione</th><th class="p-2 border-r border-slate-700 text-center">Ore</th><th class="p-2 border-r border-slate-700 text-center">Min</th><th class="p-2 border-r border-slate-700 text-center bg-blue-700">Ore Norm</th><th class="p-2 border-r border-slate-700 text-center bg-blue-700">Min Norm</th><th class="p-2 border-r border-slate-700 text-center bg-purple-700">Ore Spec</th><th class="p-2 border-r border-slate-700 text-center bg-purple-700">Min Spec</th><th class="p-2 border-r border-slate-700 text-center">Qta Prod</th><th class="p-2 border-r border-slate-700 text-center">Flag</th><th class="p-2 border-r border-slate-700 text-center">Fase</th><th class="p-2 text-center">Azione</th></tr></thead><tbody id="tabellaConsuntivazione" class="divide-y divide-slate-200 bg-white"></tbody><tfoot id="piedeConsuntivazione" class="bg-slate-100 font-bold"></tfoot></table></div>
 <div class="flex flex-wrap gap-2"><button type="button" onclick="aggiungiRigaConsuntivazione()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition flex items-center gap-1"><i class="fa-solid fa-plus"></i> Aggiungi Riga</button><button type="button" onclick="esportaConsuntivazioneExcel()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition flex items-center gap-1"><i class="fa-solid fa-file-excel"></i> Esporta Report</button><button type="button" onclick="ricaricaDaCalendario()" class="bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition flex items-center gap-1"><i class="fa-solid fa-rotate"></i> Aggiorna da Calendario</button></div>
 </div>
@@ -390,7 +511,7 @@ async function saveDataToSheets(key, data) {
 </main>
 </div>
 
-<!-- I modali rimangono invariati per brevità, il codice è completo e funzionale -->
+<!-- I modali rimangono invariati -->
 <div id="modalAttivita" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden flex items-center justify-center z-50 p-4"><div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-5 border border-slate-200 space-y-4 modal-scroll"><div class="flex justify-between items-center border-b pb-2"><h3 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-calendar-plus text-blue-600"></i> <span id="modalTitolo">Assegna Attività</span></h3><button type="button" onclick="chiudiModalAttivita()" class="text-slate-400 hover:text-slate-600 text-lg"><i class="fa-solid fa-xmark"></i></button></div><div class="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs space-y-1"><div><strong>Dipendente:</strong> <span id="mNomeDip" class="text-blue-700 font-bold">---</span></div><div><strong>Data:</strong> <span id="mData" class="text-slate-700 font-semibold">---</span> | <strong>Sede:</strong> <span id="mSede" class="font-bold text-amber-800">---</span></div><div id="mInfoReperibAuto" class="text-[11px] font-bold text-rose-700 pt-1"></div></div><div><label class="block text-xs font-bold text-slate-600 uppercase mb-2">Inserimenti ed Eccezioni del Giorno:</label><div id="mListaAttivita" class="space-y-2 max-h-40 overflow-y-auto p-1"></div></div><form id="formNuovaAttivita" onsubmit="salvaAttivitaModal(event)" class="border-t pt-3 space-y-3"><input type="hidden" id="modificaAttId" value=""><div class="grid grid-cols-2 gap-2"><div><label class="block text-[11px] font-bold text-slate-600 uppercase">Causale / Tipo *</label><select id="mTipo" onchange="toggleFormTipoModal()" class="w-full border rounded px-2 py-1 text-xs font-bold"><option value="ODM">Lavoro con OdM</option><option value="FE">FE - Ferie</option><option value="MA">MA - Malattia</option><option value="RC">RC - Riposo Compensativo</option><option value="RF">RF - Riposo Fisiologico</option><option value="FA">FA - Ex Festività</option><option value="REPERIBILE_ADD">Aggiungi Reperibilità</option><option value="REPERIBILE_DEL">CANCELLA Reperibilità</option></select></div><div id="boxODM"><label class="block text-[11px] font-bold text-slate-600 uppercase">OdM / NTW *</label><input type="text" id="mODM" placeholder="4001234567" class="w-full border rounded px-2 py-1 text-xs font-semibold" list="datalistODM" autocomplete="on"></div></div><div id="boxDescrizione"><label class="block text-[11px] font-bold text-slate-600 uppercase">Descrizione / Note</label><input type="text" id="mDescrizione" class="w-full border rounded px-2 py-1 text-xs font-semibold" list="datalistDescrizione" autocomplete="on"></div><div id="boxDurata" class="grid grid-cols-2 gap-2"><div><label class="block text-[11px] font-bold text-slate-600 uppercase">Durata Ore / Minuti *</label><div class="flex items-center gap-1"><input type="number" id="mOre" min="0" max="24" value="7" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"><span class="font-bold text-slate-400">:</span><input type="number" id="mMin" min="0" max="59" value="36" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"></div></div><div id="boxOP"><label class="block text-[11px] font-bold text-slate-600 uppercase">Operazione (OP)</label><input type="text" id="mOP" value="0010" class="w-full border rounded px-2 py-1 text-xs font-semibold"></div></div><div id="boxOreSpeciali" class="grid grid-cols-2 gap-2 bg-blue-50 p-2 rounded border border-blue-200"><div><label class="block text-[11px] font-bold text-blue-800 uppercase">Ore Norm / Min Norm</label><div class="flex items-center gap-1"><input type="number" id="mOreNorm" min="0" max="24" value="0" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"><span class="font-bold text-slate-400">:</span><input type="number" id="mMinNorm" min="0" max="59" value="0" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"></div></div><div><label class="block text-[11px] font-bold text-purple-800 uppercase">Ore Spec / Min Spec</label><div class="flex items-center gap-1"><input type="number" id="mOreSpec" min="0" max="24" value="0" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"><span class="font-bold text-slate-400">:</span><input type="number" id="mMinSpec" min="0" max="59" value="0" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"></div></div><div class="col-span-2 text-[11px] text-slate-600 italic" id="mValidazioneOre"></div></div><div class="flex justify-end gap-2 pt-2"><button type="button" onclick="chiudiModalAttivita()" class="px-3 py-1.5 rounded text-xs font-semibold bg-slate-200 text-slate-700 hover:bg-slate-300">Chiudi</button><button type="submit" class="px-4 py-1.5 rounded text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 shadow" id="btnSalvaAttivita">Applica</button></div></form></div></div>
 
 <div id="modalCopiaAttivita" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden flex items-center justify-center z-[60] p-4"><div class="bg-white rounded-xl shadow-2xl max-w-md w-full p-5 border border-slate-200 space-y-4"><div class="flex justify-between items-center border-b pb-2"><h3 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-copy text-blue-600"></i> Copia Attività</h3><button type="button" onclick="chiudiModalCopia()" class="text-slate-400 hover:text-slate-600 text-lg"><i class="fa-solid fa-xmark"></i></button></div><div class="bg-blue-50 p-3 rounded-lg border border-blue-200 text-xs"><div><strong>Attività originale:</strong> <span id="copiaInfoAtt" class="text-blue-700 font-bold">---</span></div><div><strong>Data:</strong> <span id="copiaInfoData" class="text-slate-700 font-semibold">---</span></div></div><form id="formCopiaAttivita" onsubmit="confermaCopiaAttivita(event)" class="space-y-3"><input type="hidden" id="copiaAttId"><div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Nuova Data *</label><input type="date" id="copiaNuovaData" required class="w-full border rounded px-2 py-1 text-xs font-bold"></div><div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Nuovo Dipendente (opzionale)</label><select id="copiaNuovoDip" class="w-full border rounded px-2 py-1 text-xs font-bold"><option value="">-- Mantieni stesso dipendente --</option></select></div><div class="flex items-center gap-2"><input type="checkbox" id="copiaEliminaOriginale" class="rounded"><label for="copiaEliminaOriginale" class="text-xs font-semibold text-slate-700">Elimina attività originale dopo la copia</label></div><div class="flex justify-end gap-2 pt-2"><button type="button" onclick="chiudiModalCopia()" class="px-3 py-1.5 rounded text-xs font-semibold bg-slate-200 text-slate-700 hover:bg-slate-300">Annulla</button><button type="submit" class="px-4 py-1.5 rounded text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 shadow">Copia</button></div></form></div></div>
@@ -449,7 +570,17 @@ window.startApp = function() {
     if (typeof aggiornaCalendario === 'function') aggiornaCalendario();
     if (typeof aggiornaSchemaNominativi === 'function') aggiornaSchemaNominativi();
     if (typeof cambiaTab === 'function') cambiaTab('calendario');
+    
+    // ✅ Mostra indicatore OdM
+    document.getElementById('odmStatusIndicator').classList.remove('hidden');
+    aggiornaContatoreOdM();
 };
+
+// ✅ NUOVA FUNZIONE: Aggiorna contatore OdM
+function aggiornaContatoreOdM() {
+    const count = Object.keys(window.odmDatabase).length;
+    document.getElementById('odmCount').textContent = `${count} record caricati`;
+}
 
 window.syncToFirebase = function(key, data) { saveDataToSheets(key, data); };
 
@@ -625,7 +756,6 @@ function popolaFiltriConsuntivazione(){
     const mesiNomi=['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
     document.getElementById('consInfoPeriodo').innerHTML=`<strong>Periodo:</strong> Settimana ${formatoOrdinaleSettimana(settimanaSel.numero)} di ${mesiNomi[meseCorrente]} ${annoCorrente} (${settimanaSel.inizio.toLocaleDateString('it-IT')} - ${settimanaSel.fine.toLocaleDateString('it-IT')}) | <strong>MSP:</strong> ${mspSelect.value} | <strong>C.D.L.:</strong> ${cdlSelect.value} | <strong>Tipo:</strong> ${document.getElementById('consTipoReport').value==='I'?'Impiegati':'Quadri'}`;
     
-    // ✅ FIX: Importa automaticamente le attività dal calendario (aggiunge solo quelle mancanti)
     importaDaCalendario(true);
 }
 
@@ -718,7 +848,23 @@ function renderTabellaConsuntivazione(anno,mese,settimana,cdl,msp,tipoReport){
             attDip.forEach(att=>{
                 const tr=document.createElement('tr');
                 tr.className='hover:bg-slate-50';
-                tr.innerHTML=`<td class="p-2 font-mono font-bold border-r border-slate-200">${formattaCID(att.cid)}</td><td class="p-2 font-semibold border-r border-slate-200">${dip.cognome} ${dip.nome}</td><td class="p-2 border-r border-slate-200">${dip.cdL}</td><td class="p-2 border-r border-slate-200 text-[10px]">${att.data}</td><td class="p-2 border-r border-slate-200"><input type="text" value="${att.odm||''}" onchange="aggiornaConsunt('${att.id}','odm',this.value)" class="w-full border rounded px-1 py-0.5 text-xs"></td><td class="p-2 border-r border-slate-200"><input type="text" value="${att.op||''}" onchange="aggiornaConsunt('${att.id}','op',this.value)" class="w-full border rounded px-1 py-0.5 text-xs"></td><td class="p-2 border-r border-slate-200 text-center"><input type="number" min="0" value="${att.ore||0}" onchange="aggiornaConsunt('${att.id}','ore',this.value)" class="input-consunt border rounded px-1 py-0.5 text-xs text-center font-bold"></td><td class="p-2 border-r border-slate-200 text-center"><input type="number" min="0" max="59" value="${att.min||0}" onchange="aggiornaConsunt('${att.id}','min',this.value)" class="input-consunt border rounded px-1 py-0.5 text-xs text-center font-bold"></td><td class="p-2 border-r border-slate-200 text-center bg-blue-50"><input type="number" min="0" value="${att.oreNorm||0}" onchange="aggiornaConsunt('${att.id}','oreNorm',this.value)" class="input-consunt border rounded px-1 py-0.5 text-xs text-center font-bold"></td><td class="p-2 border-r border-slate-200 text-center bg-blue-50"><input type="number" min="0" max="59" value="${att.minNorm||0}" onchange="aggiornaConsunt('${att.id}','minNorm',this.value)" class="input-consunt border rounded px-1 py-0.5 text-xs text-center font-bold"></td><td class="p-2 border-r border-slate-200 text-center bg-purple-50"><input type="number" min="0" value="${att.oreSpec||0}" onchange="aggiornaConsunt('${att.id}','oreSpec',this.value)" class="input-consunt border rounded px-1 py-0.5 text-xs text-center font-bold"></td><td class="p-2 border-r border-slate-200 text-center bg-purple-50"><input type="number" min="0" max="59" value="${att.minSpec||0}" onchange="aggiornaConsunt('${att.id}','minSpec',this.value)" class="input-consunt border rounded px-1 py-0.5 text-xs text-center font-bold"></td><td class="p-2 border-r border-slate-200 text-center"><input type="text" value="" class="w-12 border rounded px-1 py-0.5 text-xs text-center"></td><td class="p-2 border-r border-slate-200 text-center"><input type="text" value="" class="w-12 border rounded px-1 py-0.5 text-xs text-center"></td><td class="p-2 border-r border-slate-200 text-center"><input type="text" value="" class="w-12 border rounded px-1 py-0.5 text-xs text-center"></td><td class="p-2 text-center"><button onclick="rimuoviConsunt('${att.id}')" class="text-rose-600 hover:text-rose-800"><i class="fa-solid fa-trash"></i></button></td>`;
+                
+                // ✅ VALIDAZIONE OdM
+                let validazioneOdM = '';
+                let classeRiga = '';
+                if (att.tipo === 'ODM' && att.odm && att.op) {
+                    const validazione = validaOdM(att.odm, att.op, dip.cdL);
+                    if (validazione.valido) {
+                        validazioneOdM = '<i class="fa-solid fa-circle-check icona-validazione ok" title="OdM valido"></i>';
+                    } else {
+                        validazioneOdM = `<i class="fa-solid fa-circle-xmark icona-validazione errore tooltip-odm" data-tooltip="${validazione.motivo}" title="${validazione.motivo}"></i>`;
+                        classeRiga = 'riga-odm-errore';
+                    }
+                }
+                
+                if (classeRiga) tr.classList.add(classeRiga);
+                
+                tr.innerHTML=`<td class="p-2 font-mono font-bold border-r border-slate-200">${formattaCID(att.cid)}</td><td class="p-2 font-semibold border-r border-slate-200">${dip.cognome} ${dip.nome}</td><td class="p-2 border-r border-slate-200">${dip.cdL}</td><td class="p-2 border-r border-slate-200 text-[10px]">${att.data}</td><td class="p-2 border-r border-slate-200"><input type="text" value="${att.odm||''}" onchange="aggiornaConsunt('${att.id}','odm',this.value)" class="w-full border rounded px-1 py-0.5 text-xs">${validazioneOdM}</td><td class="p-2 border-r border-slate-200"><input type="text" value="${att.op||''}" onchange="aggiornaConsunt('${att.id}','op',this.value)" class="w-full border rounded px-1 py-0.5 text-xs"></td><td class="p-2 border-r border-slate-200 text-center"><input type="number" min="0" value="${att.ore||0}" onchange="aggiornaConsunt('${att.id}','ore',this.value)" class="input-consunt border rounded px-1 py-0.5 text-xs text-center font-bold"></td><td class="p-2 border-r border-slate-200 text-center"><input type="number" min="0" max="59" value="${att.min||0}" onchange="aggiornaConsunt('${att.id}','min',this.value)" class="input-consunt border rounded px-1 py-0.5 text-xs text-center font-bold"></td><td class="p-2 border-r border-slate-200 text-center bg-blue-50"><input type="number" min="0" value="${att.oreNorm||0}" onchange="aggiornaConsunt('${att.id}','oreNorm',this.value)" class="input-consunt border rounded px-1 py-0.5 text-xs text-center font-bold"></td><td class="p-2 border-r border-slate-200 text-center bg-blue-50"><input type="number" min="0" max="59" value="${att.minNorm||0}" onchange="aggiornaConsunt('${att.id}','minNorm',this.value)" class="input-consunt border rounded px-1 py-0.5 text-xs text-center font-bold"></td><td class="p-2 border-r border-slate-200 text-center bg-purple-50"><input type="number" min="0" value="${att.oreSpec||0}" onchange="aggiornaConsunt('${att.id}','oreSpec',this.value)" class="input-consunt border rounded px-1 py-0.5 text-xs text-center font-bold"></td><td class="p-2 border-r border-slate-200 text-center bg-purple-50"><input type="number" min="0" max="59" value="${att.minSpec||0}" onchange="aggiornaConsunt('${att.id}','minSpec',this.value)" class="input-consunt border rounded px-1 py-0.5 text-xs text-center font-bold"></td><td class="p-2 border-r border-slate-200 text-center"><input type="text" value="" class="w-12 border rounded px-1 py-0.5 text-xs text-center"></td><td class="p-2 border-r border-slate-200 text-center"><input type="text" value="" class="w-12 border rounded px-1 py-0.5 text-xs text-center"></td><td class="p-2 border-r border-slate-200 text-center"><input type="text" value="" class="w-12 border rounded px-1 py-0.5 text-xs text-center"></td><td class="p-2 text-center"><button onclick="rimuoviConsunt('${att.id}')" class="text-rose-600 hover:text-rose-800"><i class="fa-solid fa-trash"></i></button></td>`;
                 tbody.appendChild(tr);
                 totaleOre+=parseInt(att.ore||0);
                 totaleMin+=parseInt(att.min||0);
@@ -919,205 +1065,11 @@ function rimuoviFestivita(id){festivitaCustom=festivitaCustom.filter(f=>f.id!==i
 function popolaAnniIniziali(){const select=document.getElementById('calAnno');const annoCurr=new Date().getFullYear();select.innerHTML='';for(let a=2016;a<=2054;a++){const opt=document.createElement('option');opt.value=a;opt.textContent=a;if(a===annoCurr)opt.selected=true;select.appendChild(opt);}}
 function setModalitaVista(tipo){vistaAttuale=tipo;document.getElementById('btnVistaSettimana').className=tipo==='settimana'?"px-3 py-1.5 text-xs font-bold rounded-l-lg border border-slate-300 bg-blue-600 text-white":"px-3 py-1.5 text-xs font-bold border border-slate-300 bg-white text-slate-700 hover:bg-slate-50";document.getElementById('btnVistaMese').className=tipo==='mese'?"px-3 py-1.5 text-xs font-bold border border-slate-300 bg-blue-600 text-white":"px-3 py-1.5 text-xs font-bold border border-slate-300 bg-white text-slate-700 hover:bg-slate-50";document.getElementById('btnVistaAnnuale').className=tipo==='annuale'?"px-3 py-1.5 text-xs font-bold rounded-r-lg border border-slate-300 bg-blue-600 text-white":"px-3 py-1.5 text-xs font-bold rounded-r-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50";aggiornaVisibilitaFiltriCalendario();aggiornaCalendario();}
 function aggiornaCalendario(){const filtroMSP=document.getElementById('filtroMSP').value;const filtroTesto=(document.getElementById('filtroPersonale').value||'').toLowerCase().trim();let dipFiltro=dipendenti;if(filtroMSP!=='TUTTI')dipFiltro=dipFiltro.filter(d=>d.msp===filtroMSP);if(filtroTesto){dipFiltro=dipFiltro.filter(d=>{const cognome=(d.cognome||'').toLowerCase();const nome=(d.nome||'').toLowerCase();const msp=(d.msp||'').toLowerCase();const nominativo=(d.nominativo||'').toLowerCase();return cognome.includes(filtroTesto)||nome.includes(filtroTesto)||msp.includes(filtroTesto)||nominativo.includes(filtroTesto);});}const container=document.getElementById('contenitoreGrigliaCalendario');container.innerHTML='';if(vistaAttuale==='settimana')renderVistaSettimanale(container,dipFiltro);else if(vistaAttuale==='mese')renderVistaMensile(container,dipFiltro);else if(vistaAttuale==='annuale')renderVistaAnnuale(container,dipFiltro);}
-
-function renderVistaAnnuale(container,listaDip){
-    const listaOrdinata = ordinaDipendenti(listaDip);
-    const anno=dataRiferimento.getFullYear();
-    const mesiNomi=['GENNAIO','FEBBRAIO','MARZO','APRILE','MAGGIO','GIUGNO','LUGLIO','AGOSTO','SETTEMBRE','OTTOBRE','NOVEMBRE','DICEMBRE'];
-    const giorniSettimana=['LUN','MAR','MER','GIO','VEN','SAB','DOM'];
-    const oggi=new Date();oggi.setHours(0,0,0,0);
-    document.getElementById('labelFinestraData').textContent=`Panoramica Anno ${anno}`;
-    let html='<div class="panoramica-anno">';
-    for(let m=0;m<12;m++){
-        html+=`<div class="panoramica-mese">`;
-        html+=`<div class="panoramica-mese-header" onclick="vaiAMese(${m})" title="Clicca per vedere il mese ${mesiNomi[m]}">${mesiNomi[m]}</div>`;
-        html+='<div class="panoramica-giorni-header"><div></div>';
-        giorniSettimana.forEach((g,i)=>{const isWeekend=(i>=5);html+=`<div class="${isWeekend?'weekend-header':''}">${g}</div>`;});
-        html+='</div>';
-        const primoGiorno=new Date(anno,m,1);
-        const ultimoGiorno=new Date(anno,m+1,0);
-        let giornoCorrente=new Date(primoGiorno);
-        const giornoSettimana1=primoGiorno.getDay();
-        const offsetLunedi=giornoSettimana1===0?-6:1-giornoSettimana1;
-        giornoCorrente.setDate(giornoCorrente.getDate()+offsetLunedi);
-        while(giornoCorrente<=ultimoGiorno||giornoCorrente.getDay()!==1){
-            const numSettISO=getNumeroSettimana(giornoCorrente);
-            html+=`<div class="panoramica-settimana-row">`;
-            html+=`<div class="panoramica-num-sett" title="Settimana ISO ${numSettISO}">${numSettISO}</div>`;
-            for(let d=0;d<7;d++){
-                const dataCella=new Date(giornoCorrente);dataCella.setDate(dataCella.getDate()+d);
-                const giorno=dataCella.getDate();
-                const meseData=dataCella.getMonth();
-                const annoData=dataCella.getFullYear();
-                const isFuoriMese=meseData!==m;
-                const isWeekend=(dataCella.getDay()===0||dataCella.getDay()===6);
-                const festInfo=isFuoriMese?null:isDataFestiva(dataCella);
-                const isOggi=dataCella.getTime()===oggi.getTime();
-                let classi='panoramica-giorno';
-                if(isOggi){if(isFuoriMese){classi+=' oggi-fuori-mese';}else{classi+=' oggi';}}
-                else if(isFuoriMese){classi+=' fuori-mese';if(isWeekend)classi+=' weekend';if(festInfo){if(festInfo.tipo==='PATRONO'){classi+=' patrono';}else{classi+=' festivo';}}}
-                else{if(isWeekend)classi+=' weekend';if(festInfo){if(festInfo.tipo==='PATRONO'){classi+=' patrono';}else{classi+=' festivo';}}}
-                const titolo=festInfo?`${giorno} - ${festInfo.nome}`:`${giorno}`;
-                const cliccabile=(!isFuoriMese)||isOggi;
-                const onclick=cliccabile?`onclick="vaiAGiorno(${annoData},${meseData},${giorno})"`:'';
-                const style=cliccabile?'cursor:pointer;':'cursor:default;';
-                html+=`<div class="${classi}" title="${titolo}" ${onclick} style="${style}">${giorno}</div>`;
-            }
-            html+=`</div>`;
-            giornoCorrente.setDate(giornoCorrente.getDate()+7);
-            if(giornoCorrente>ultimoGiorno&&giornoCorrente.getDay()===1)break;
-        }
-        html+=`</div>`;
-    }
-    html+='</div>';
-    html+=`<div class="mt-4 p-3 bg-slate-50 rounded border border-slate-200 text-xs flex flex-wrap gap-3 items-center justify-center"><span class="font-bold text-slate-700">Legenda:</span><span class="px-2 py-1 rounded bg-amber-100 text-amber-800 font-bold">🟠 Weekend</span><span class="px-2 py-1 rounded bg-red-200 text-red-900 font-bold">🔴 Festivo Nazionale/Aziendale</span><span class="px-2 py-1 rounded bg-pink-100 text-pink-900 font-bold border border-pink-300">🌸 Patrono</span><span class="px-2 py-1 rounded bg-red-600 text-white font-bold">⬛ Oggi</span><span class="text-slate-600 italic">💡 Clicca su un mese per la vista mensile | Clicca su un giorno per la vista settimanale</span></div>`;
-    container.innerHTML=html;
-}
-
+function renderVistaAnnuale(container,listaDip){const listaOrdinata = ordinaDipendenti(listaDip);const anno=dataRiferimento.getFullYear();const mesiNomi=['GENNAIO','FEBBRAIO','MARZO','APRILE','MAGGIO','GIUGNO','LUGLIO','AGOSTO','SETTEMBRE','OTTOBRE','NOVEMBRE','DICEMBRE'];const giorniSettimana=['LUN','MAR','MER','GIO','VEN','SAB','DOM'];const oggi=new Date();oggi.setHours(0,0,0,0);document.getElementById('labelFinestraData').textContent=`Panoramica Anno ${anno}`;let html='<div class="panoramica-anno">';for(let m=0;m<12;m++){html+=`<div class="panoramica-mese">`;html+=`<div class="panoramica-mese-header" onclick="vaiAMese(${m})" title="Clicca per vedere il mese ${mesiNomi[m]}">${mesiNomi[m]}</div>`;html+='<div class="panoramica-giorni-header"><div></div>';giorniSettimana.forEach((g,i)=>{const isWeekend=(i>=5);html+=`<div class="${isWeekend?'weekend-header':''}">${g}</div>`;});html+='</div>';const primoGiorno=new Date(anno,m,1);const ultimoGiorno=new Date(anno,m+1,0);let giornoCorrente=new Date(primoGiorno);const giornoSettimana1=primoGiorno.getDay();const offsetLunedi=giornoSettimana1===0?-6:1-giornoSettimana1;giornoCorrente.setDate(giornoCorrente.getDate()+offsetLunedi);while(giornoCorrente<=ultimoGiorno||giornoCorrente.getDay()!==1){const numSettISO=getNumeroSettimana(giornoCorrente);html+=`<div class="panoramica-settimana-row">`;html+=`<div class="panoramica-num-sett" title="Settimana ISO ${numSettISO}">${numSettISO}</div>`;for(let d=0;d<7;d++){const dataCella=new Date(giornoCorrente);dataCella.setDate(dataCella.getDate()+d);const giorno=dataCella.getDate();const meseData=dataCella.getMonth();const annoData=dataCella.getFullYear();const isFuoriMese=meseData!==m;const isWeekend=(dataCella.getDay()===0||dataCella.getDay()===6);const festInfo=isFuoriMese?null:isDataFestiva(dataCella);const isOggi=dataCella.getTime()===oggi.getTime();let classi='panoramica-giorno';if(isOggi){if(isFuoriMese){classi+=' oggi-fuori-mese';}else{classi+=' oggi';}}else if(isFuoriMese){classi+=' fuori-mese';if(isWeekend)classi+=' weekend';if(festInfo){if(festInfo.tipo==='PATRONO'){classi+=' patrono';}else{classi+=' festivo';}}}else{if(isWeekend)classi+=' weekend';if(festInfo){if(festInfo.tipo==='PATRONO'){classi+=' patrono';}else{classi+=' festivo';}}}const titolo=festInfo?`${giorno} - ${festInfo.nome}`:`${giorno}`;const cliccabile=(!isFuoriMese)||isOggi;const onclick=cliccabile?`onclick="vaiAGiorno(${annoData},${meseData},${giorno})"`:'';const style=cliccabile?'cursor:pointer;':'cursor:default;';html+=`<div class="${classi}" title="${titolo}" ${onclick} style="${style}">${giorno}</div>`;}html+=`</div>`;giornoCorrente.setDate(giornoCorrente.getDate()+7);if(giornoCorrente>ultimoGiorno&&giornoCorrente.getDay()===1)break;}html+=`</div>`;}html+='</div>';html+=`<div class="mt-4 p-3 bg-slate-50 rounded border border-slate-200 text-xs flex flex-wrap gap-3 items-center justify-center"><span class="font-bold text-slate-700">Legenda:</span><span class="px-2 py-1 rounded bg-amber-100 text-amber-800 font-bold">🟠 Weekend</span><span class="px-2 py-1 rounded bg-red-200 text-red-900 font-bold">🔴 Festivo Nazionale/Aziendale</span><span class="px-2 py-1 rounded bg-pink-100 text-pink-900 font-bold border border-pink-300">🌸 Patrono</span><span class="px-2 py-1 rounded bg-red-600 text-white font-bold">⬛ Oggi</span><span class="text-slate-600 italic">💡 Clicca su un mese per la vista mensile | Clicca su un giorno per la vista settimanale</span></div>`;container.innerHTML=html;}
 function vaiAMese(mese){dataRiferimento.setMonth(mese);dataRiferimento.setDate(1);setModalitaVista('mese');sincronizzaSelettoriDaData();}
 function vaiAGiorno(anno,mese,giorno){dataRiferimento.setFullYear(anno);dataRiferimento.setMonth(mese);dataRiferimento.setDate(giorno);setModalitaVista('settimana');sincronizzaSelettoriDaData();}
-
-function renderVistaSettimanale(container,listaDip){
-    const listaOrdinata = ordinaDipendenti(listaDip);
-    const giorni=[];for(let i=0;i<7;i++){const d=new Date(dataRiferimento);d.setDate(d.getDate()+i);giorni.push(d);}
-    const inis=giorni[0].toLocaleDateString('it-IT',{day:'2-digit',month:'short',year:'numeric'});
-    const fins=giorni[6].toLocaleDateString('it-IT',{day:'2-digit',month:'short',year:'numeric'});
-    const numW=getNumeroSettimana(giorni[0]);
-    const mesiNomi=['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
-    document.getElementById('labelFinestraData').textContent=`Settimana W${numW} (${inis} - ${fins})`;
-    let html=`<table class="tabella-calendario-settimana text-left border-collapse border border-slate-200 text-xs">`;
-    html+=`<colgroup><col style="width:240px;min-width:240px;"><col style="width:calc((100% - 240px) / 7);"><col style="width:calc((100% - 240px) / 7);"><col style="width:calc((100% - 240px) / 7);"><col style="width:calc((100% - 240px) / 7);"><col style="width:calc((100% - 240px) / 7);"><col style="width:calc((100% - 240px) / 7);"><col style="width:calc((100% - 240px) / 7);"></colgroup>`;
-    html+=`<thead><tr class="bg-slate-800 text-white font-bold"><th class="p-2 border border-slate-700 bg-slate-900 text-white">Dipendente / Sede / Reperib.</th>`;
-    const oggi=new Date();oggi.setHours(0,0,0,0);
-    giorni.forEach(d=>{
-        const nomeGiorno=d.toLocaleDateString('it-IT',{weekday:'short',day:'2-digit'});
-        const isWeekend=(d.getDay()===0||d.getDay()===6);
-        const festNome=getFestivitaPerDipendente(d,'Tutte');
-        const isEvidenziato=isWeekend||!!festNome;
-        const dataCorrente=new Date(d);dataCorrente.setHours(0,0,0,0);
-        const isOggi=dataCorrente.getTime()===oggi.getTime();
-        const dataNorm=new Date(d);dataNorm.setHours(0,0,0,0);
-        const settCons=trovaSettimanaConsuntivazione(dataNorm);
-        const labelSettMese=settCons?`${formatoOrdinaleSettimana(settCons.numero)} - ${mesiNomi[d.getMonth()]}`:'';
-        html+=`<th class="header-giorno ${isEvidenziato?'evidenziato':''} ${isOggi?'oggi':''} border border-slate-700 text-center" style="min-height:55px;"><div style="font-size:14px;font-weight:800;color:#000000;">${nomeGiorno}</div>${labelSettMese?`<div class="label-sett-mese mt-0.5">${labelSettMese}</div>`:''}${isOggi?`<div class="text-[9px] font-bold text-red-600 mt-0.5">OGGI</div>`:''}${festNome?`<div class="text-[9px] font-normal mt-0.5 leading-tight" title="${festNome}">${festNome}</div>`:''}</th>`;
-    });
-    html+=`</tr></thead><tbody>`;
-    listaOrdinata.forEach((dip,idx)=>{
-        if(idx>0){html+=`<tr><td colspan="8" style="height:2px;background:#000;padding:0;border:none;"></td></tr>`;}
-        html+=`<tr><td class="p-2 bg-slate-50 border border-slate-200 font-semibold align-top"><div class="font-bold text-slate-800">${dip.cognome} ${dip.nome}</div><div class="text-[11px] text-slate-500">${dip.cdL} (${dip.classe}) | <span class="font-bold text-amber-800">${dip.sedeLavoro||'---'}</span></div><div class="text-[11px] font-bold text-slate-600 mt-0.5">Assegnazione: ${dip.turnoRep?'Gr. '+dip.turnoRep:'Escluso'}</div></td>`;
-        giorni.forEach(d=>{
-            const isoData=dataLocaleToString(d);
-            const atts=attivitaCalendario.filter(a=>a.cid===dip.cid&&a.data===isoData);
-            const festNomePersona=getFestivitaPerDipendente(d,dip.sedeLavoro);
-            const isGiornoLavorativoStandard=(d.getDay()>=1&&d.getDay()<=5)&&!festNomePersona;
-            const isWeekend=(d.getDay()===0||d.getDay()===6);
-            const statoRep=getStatoReperibilitaEffettivo(dip.cid,d);
-            let bgCella="bg-white";
-            if(festNomePersona)bgCella="bg-rose-100/60";
-            else if(isWeekend)bgCella="bg-amber-100/60";
-            html+=`<td class="p-1 border border-slate-200 cella-calendario-settimana cursor-pointer hover:bg-blue-50/50 ${bgCella}" onclick="apriModalAttivita('${dip.cid}','${isoData}')">`;
-            if(atts.length>0){
-                atts.forEach(a=>{
-                    if(a.tipo==='FE')html+=`<div class="bg-slate-600 text-white rounded p-1 mb-1 text-[11px] font-black text-center shadow-sm relative">FE - FERIE<button onclick="event.stopPropagation();apriModalCopia('${a.id}')" class="absolute top-0 right-0 bg-blue-500 hover:bg-blue-600 text-white text-[8px] px-1 rounded-bl" title="Copia"><i class="fa-solid fa-copy"></i></button><button onclick="event.stopPropagation();apriModalModificaAttivita('${a.id}')" class="absolute top-0 left-0 bg-amber-500 hover:bg-amber-600 text-white text-[8px] px-1 rounded-br" title="Modifica"><i class="fa-solid fa-pen"></i></button></div>`;
-                    else if(a.tipo==='MA')html+=`<div class="bg-violet-600 text-white rounded p-1 mb-1 text-[11px] font-black text-center shadow-sm relative">MA - MALATTIA<button onclick="event.stopPropagation();apriModalCopia('${a.id}')" class="absolute top-0 right-0 bg-blue-500 hover:bg-blue-600 text-white text-[8px] px-1 rounded-bl" title="Copia"><i class="fa-solid fa-copy"></i></button><button onclick="event.stopPropagation();apriModalModificaAttivita('${a.id}')" class="absolute top-0 left-0 bg-amber-500 hover:bg-amber-600 text-white text-[8px] px-1 rounded-br" title="Modifica"><i class="fa-solid fa-pen"></i></button></div>`;
-                    else if(a.tipo==='RC')html+=`<div class="bg-teal-600 text-white rounded p-1 mb-1 text-[11px] font-black text-center shadow-sm relative">RC - RIPOSO COMP.<button onclick="event.stopPropagation();apriModalCopia('${a.id}')" class="absolute top-0 right-0 bg-blue-500 hover:bg-blue-600 text-white text-[8px] px-1 rounded-bl" title="Copia"><i class="fa-solid fa-copy"></i></button><button onclick="event.stopPropagation();apriModalModificaAttivita('${a.id}')" class="absolute top-0 left-0 bg-amber-500 hover:bg-amber-600 text-white text-[8px] px-1 rounded-br" title="Modifica"><i class="fa-solid fa-pen"></i></button></div>`;
-                    else if(a.tipo==='RF')html+=`<div class="bg-emerald-600 text-white rounded p-1 mb-1 text-[11px] font-bold shadow-sm relative"><div class="font-bold">RF - Riposo Fis.</div><div class="text-[10px] font-semibold">${a.ore}h ${a.min}m</div><button onclick="event.stopPropagation();apriModalCopia('${a.id}')" class="absolute top-0 right-0 bg-blue-500 hover:bg-blue-600 text-white text-[8px] px-1 rounded-bl" title="Copia"><i class="fa-solid fa-copy"></i></button><button onclick="event.stopPropagation();apriModalModificaAttivita('${a.id}')" class="absolute top-0 left-0 bg-amber-500 hover:bg-amber-600 text-white text-[8px] px-1 rounded-br" title="Modifica"><i class="fa-solid fa-pen"></i></button></div>`;
-                    else if(a.tipo==='FA')html+=`<div class="bg-slate-600 text-white rounded p-1 mb-1 text-[11px] font-bold shadow-sm relative"><div class="font-bold">${a.tipo}</div>${(a.ore||a.min)?`<div class="text-[10px] font-semibold">${a.ore}h ${a.min}m</div>`:''}<button onclick="event.stopPropagation();apriModalCopia('${a.id}')" class="absolute top-0 right-0 bg-blue-500 hover:bg-blue-600 text-white text-[8px] px-1 rounded-bl" title="Copia"><i class="fa-solid fa-copy"></i></button><button onclick="event.stopPropagation();apriModalModificaAttivita('${a.id}')" class="absolute top-0 left-0 bg-amber-500 hover:bg-amber-600 text-white text-[8px] px-1 rounded-br" title="Modifica"><i class="fa-solid fa-pen"></i></button></div>`;
-                    else if(a.tipo==='ODM'){
-                        const oreNorm=a.oreNorm||0;const minNorm=a.minNorm||0;const oreSpec=a.oreSpec||0;const minSpec=a.minSpec||0;
-                        const extraInfo=(oreNorm>0||minNorm>0||oreSpec>0||minSpec>0)?`<div class="text-[9px] text-slate-500">N:${oreNorm}h${minNorm}m S:${oreSpec}h${minSpec}m</div>`:'';
-                        html+=`<div class="bg-sky-100 border border-sky-300 text-sky-950 rounded p-1 mb-1 text-[11px] shadow-sm relative"><div class="font-bold">OdM: ${a.odm}</div><div class="text-[10px] text-slate-600 truncate line-clamp-2">${a.desc||''}</div><div class="text-[10px] text-sky-800 font-semibold">${a.ore}h ${a.min}m (OP:${a.op})</div>${extraInfo}<button onclick="event.stopPropagation();apriModalCopia('${a.id}')" class="absolute top-0 right-0 bg-blue-500 hover:bg-blue-600 text-white text-[8px] px-1 rounded-bl" title="Copia"><i class="fa-solid fa-copy"></i></button><button onclick="event.stopPropagation();apriModalModificaAttivita('${a.id}')" class="absolute top-0 left-0 bg-amber-500 hover:bg-amber-600 text-white text-[8px] px-1 rounded-br" title="Modifica"><i class="fa-solid fa-pen"></i></button></div>`;
-                    }
-                });
-                let minutiLavoroTotali=0;
-                atts.filter(a=>a.tipo==='ODM').forEach(a=>minutiLavoroTotali+=((a.ore||0)*60+(a.min||0)));
-                if(minutiLavoroTotali>0){
-                    let minutiStraordinario=0;
-                    if(!isGiornoLavorativoStandard)minutiStraordinario=minutiLavoroTotali;
-                    else if(minutiLavoroTotali>MINUTI_GIORNATA_STANDARD)minutiStraordinario=minutiLavoroTotali-MINUTI_GIORNATA_STANDARD;
-                    if(minutiStraordinario>0){
-                        const hStr=Math.floor(minutiStraordinario/60);
-                        const mStr=minutiStraordinario%60;
-                        html+=`<div class="bg-orange-200 border border-orange-400 text-rose-900 rounded p-1 mb-1 text-[11px] font-bold text-center shadow-sm"><i class="fa-solid fa-clock mr-1"></i> Straord: ${hStr}h ${mStr}m</div>`;
-                    }
-                }
-            }else if(!festNomePersona&&!statoRep.isReperibile&&statoRep.tipo!=='DEL'){
-                html+=`<div class="text-[11px] text-slate-400 italic text-center py-2">+ Add</div>`;
-            }
-            if(statoRep.isReperibile){
-                if(statoRep.tipo==='AUTO')html+=`<div class="badge-reperibilita-fisso bg-rose-600 text-white rounded p-1 text-[11px] font-bold shadow-sm flex items-center justify-center gap-1"><i class="fa-solid fa-phone"></i> H24</div>`;
-                else if(statoRep.tipo==='ADD')html+=`<div class="badge-reperibilita-fisso bg-amber-600 text-white rounded p-1 text-[11px] font-bold shadow-sm flex items-center justify-center gap-1"><i class="fa-solid fa-user-plus"></i> Man.</div>`;
-            }else if(statoRep.tipo==='DEL'){
-                html+=`<div class="badge-reperibilita-fisso bg-slate-300 text-slate-700 rounded p-1 text-[10px] font-bold text-center border border-slate-400"><i class="fa-solid fa-phone-slash mr-1"></i> Annullata</div>`;
-            }
-            html+=`</td>`;
-        });
-        html+=`</tr>`;
-    });
-    html+=`</tbody></table>`;
-    container.innerHTML=html;
-}
-
-function renderVistaMensile(container,listaDip){
-    const listaOrdinata = ordinaDipendenti(listaDip);
-    const anno=dataRiferimento.getFullYear();
-    const mese=dataRiferimento.getMonth();
-    const giorniInMese=new Date(anno,mese+1,0).getDate();
-    const giorniSettimana=['DOM','LUN','MAR','MER','GIO','VEN','SAB'];
-    const mesiNomi=['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
-    document.getElementById('labelFinestraData').textContent=`Mese completo: ${dataRiferimento.toLocaleDateString('it-IT',{month:'long',year:'numeric'})}`;
-    let html=`<table class="w-full text-left border-collapse border border-slate-200 text-xs"><thead><tr class="bg-slate-800 text-white font-bold"><th class="p-2 border border-slate-700 w-48">Dipendente</th>`;
-    const oggi=new Date();oggi.setHours(0,0,0,0);
-    for(let g=1;g<=giorniInMese;g++){
-        const d=new Date(anno,mese,g);
-        const isWeekend=(d.getDay()===0||d.getDay()===6);
-        const festNome=getFestivitaPerDipendente(d,'Tutte');
-        const isEvidenziato=isWeekend||!!festNome;
-        const dataCorrente=new Date(d);dataCorrente.setHours(0,0,0,0);
-        const isOggi=dataCorrente.getTime()===oggi.getTime();
-        const settCons=trovaSettimanaConsuntivazione(dataCorrente);
-        const labelSettCons=settCons?`w${formatoOrdinaleSettimana(settCons.numero)}`:'';
-        html+=`<th class="p-1 border border-slate-700 text-center text-[11px] w-8 header-giorno ${isEvidenziato?'evidenziato':''} ${isOggi?'oggi':''}"><div style="font-size:14px;font-weight:800;color:#000000;">${g}</div><span class="text-[9px] font-normal opacity-80">${giorniSettimana[d.getDay()]}</span>${labelSettCons?`<br><span class="text-[8px] font-bold">${labelSettCons}</span>`:''}</th>`;
-    }
-    html+=`</tr></thead><tbody>`;
-    listaOrdinata.forEach(dip=>{
-        html+=`<tr><td class="p-2 bg-slate-50 border border-slate-200 font-semibold text-[12px]">${dip.cognome} ${dip.nome}</td>`;
-        for(let g=1;g<=giorniInMese;g++){
-            const d=new Date(anno,mese,g);
-            const isoData=dataLocaleToString(d);
-            const atts=attivitaCalendario.filter(a=>a.cid===dip.cid&&a.data===isoData);
-            const haAssenzaGiornata=atts.some(a=>a.tipo==='FE'||a.tipo==='RC'||a.tipo==='MA');
-            const haRF=atts.some(a=>a.tipo==='RF');
-            const festNome=getFestivitaPerDipendente(d,dip.sedeLavoro);
-            const isWeekend=(d.getDay()===0||d.getDay()===6);
-            const statoRep=getStatoReperibilitaEffettivo(dip.cid,d);
-            let contenutoCella='-';
-            let bgCell="bg-white text-slate-300";
-            let badgeHtml='';
-            if(haAssenzaGiornata){
-                const tipoAssenza=atts.find(a=>a.tipo==='FE'||a.tipo==='RC'||a.tipo==='MA').tipo;
-                if(tipoAssenza==='MA'){bgCell="bg-violet-600 text-white font-bold";}else{bgCell="bg-slate-600 text-white font-bold";}
-                contenutoCella=tipoAssenza;
-            }else if(haRF){
-                bgCell="bg-emerald-600 text-white font-bold";
-                contenutoCella='RF';
-            }else if(statoRep.isReperibile){
-                bgCell=statoRep.tipo==='ADD'?"bg-amber-500 text-white font-bold":"bg-rose-500 text-white font-bold";
-                contenutoCella='R';
-            }
-            if(atts.length>0&&!haAssenzaGiornata&&!haRF){badgeHtml=`<div class="badge-attivita">${atts.length}</div>`;}
-            if(atts.length===0&&!haAssenzaGiornata&&!haRF&&!statoRep.isReperibile){
-                if(festNome)bgCell="bg-rose-100 text-rose-900 font-bold";
-                else if(isWeekend)bgCell="bg-amber-100 text-amber-900 font-bold";
-            }
-            html+=`<td onclick="apriModalAttivita('${dip.cid}','${isoData}')" class="p-0.5 border border-slate-200 text-center text-[11px] cursor-pointer cella-calendario-mese ${bgCell}">${badgeHtml}${contenutoCella}</td>`;
-        }
-        html+=`</tr>`;
-    });
-    html+=`</tbody></table>`;
-    container.innerHTML=html;
-}
-
+function renderVistaSettimanale(container,listaDip){const listaOrdinata = ordinaDipendenti(listaDip);const giorni=[];for(let i=0;i<7;i++){const d=new Date(dataRiferimento);d.setDate(d.getDate()+i);giorni.push(d);}const inis=giorni[0].toLocaleDateString('it-IT',{day:'2-digit',month:'short',year:'numeric'});const fins=giorni[6].toLocaleDateString('it-IT',{day:'2-digit',month:'short',year:'numeric'});const numW=getNumeroSettimana(giorni[0]);const mesiNomi=['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];document.getElementById('labelFinestraData').textContent=`Settimana W${numW} (${inis} - ${fins})`;let html=`<table class="tabella-calendario-settimana text-left border-collapse border border-slate-200 text-xs">`;html+=`<colgroup><col style="width:240px;min-width:240px;"><col style="width:calc((100% - 240px) / 7);"><col style="width:calc((100% - 240px) / 7);"><col style="width:calc((100% - 240px) / 7);"><col style="width:calc((100% - 240px) / 7);"><col style="width:calc((100% - 240px) / 7);"><col style="width:calc((100% - 240px) / 7);"><col style="width:calc((100% - 240px) / 7);"></colgroup>`;html+=`<thead><tr class="bg-slate-800 text-white font-bold"><th class="p-2 border border-slate-700 bg-slate-900 text-white">Dipendente / Sede / Reperib.</th>`;const oggi=new Date();oggi.setHours(0,0,0,0);giorni.forEach(d=>{const nomeGiorno=d.toLocaleDateString('it-IT',{weekday:'short',day:'2-digit'});const isWeekend=(d.getDay()===0||d.getDay()===6);const festNome=getFestivitaPerDipendente(d,'Tutte');const isEvidenziato=isWeekend||!!festNome;const dataCorrente=new Date(d);dataCorrente.setHours(0,0,0,0);const isOggi=dataCorrente.getTime()===oggi.getTime();const dataNorm=new Date(d);dataNorm.setHours(0,0,0,0);const settCons=trovaSettimanaConsuntivazione(dataNorm);const labelSettMese=settCons?`${formatoOrdinaleSettimana(settCons.numero)} - ${mesiNomi[d.getMonth()]}`:'';html+=`<th class="header-giorno ${isEvidenziato?'evidenziato':''} ${isOggi?'oggi':''} border border-slate-700 text-center" style="min-height:55px;"><div style="font-size:14px;font-weight:800;color:#000000;">${nomeGiorno}</div>${labelSettMese?`<div class="label-sett-mese mt-0.5">${labelSettMese}</div>`:''}${isOggi?`<div class="text-[9px] font-bold text-red-600 mt-0.5">OGGI</div>`:''}${festNome?`<div class="text-[9px] font-normal mt-0.5 leading-tight" title="${festNome}">${festNome}</div>`:''}</th>`;});html+=`</tr></thead><tbody>`;listaOrdinata.forEach((dip,idx)=>{if(idx>0){html+=`<tr><td colspan="8" style="height:2px;background:#000;padding:0;border:none;"></td></tr>`;}html+=`<tr><td class="p-2 bg-slate-50 border border-slate-200 font-semibold align-top"><div class="font-bold text-slate-800">${dip.cognome} ${dip.nome}</div><div class="text-[11px] text-slate-500">${dip.cdL} (${dip.classe}) | <span class="font-bold text-amber-800">${dip.sedeLavoro||'---'}</span></div><div class="text-[11px] font-bold text-slate-600 mt-0.5">Assegnazione: ${dip.turnoRep?'Gr. '+dip.turnoRep:'Escluso'}</div></td>`;giorni.forEach(d=>{const isoData=dataLocaleToString(d);const atts=attivitaCalendario.filter(a=>a.cid===dip.cid&&a.data===isoData);const festNomePersona=getFestivitaPerDipendente(d,dip.sedeLavoro);const isGiornoLavorativoStandard=(d.getDay()>=1&&d.getDay()<=5)&&!festNomePersona;const isWeekend=(d.getDay()===0||d.getDay()===6);const statoRep=getStatoReperibilitaEffettivo(dip.cid,d);let bgCella="bg-white";if(festNomePersona)bgCella="bg-rose-100/60";else if(isWeekend)bgCella="bg-amber-100/60";html+=`<td class="p-1 border border-slate-200 cella-calendario-settimana cursor-pointer hover:bg-blue-50/50 ${bgCella}" onclick="apriModalAttivita('${dip.cid}','${isoData}')">`;if(atts.length>0){atts.forEach(a=>{if(a.tipo==='FE')html+=`<div class="bg-slate-600 text-white rounded p-1 mb-1 text-[11px] font-black text-center shadow-sm relative">FE - FERIE<button onclick="event.stopPropagation();apriModalCopia('${a.id}')" class="absolute top-0 right-0 bg-blue-500 hover:bg-blue-600 text-white text-[8px] px-1 rounded-bl" title="Copia"><i class="fa-solid fa-copy"></i></button><button onclick="event.stopPropagation();apriModalModificaAttivita('${a.id}')" class="absolute top-0 left-0 bg-amber-500 hover:bg-amber-600 text-white text-[8px] px-1 rounded-br" title="Modifica"><i class="fa-solid fa-pen"></i></button></div>`;else if(a.tipo==='MA')html+=`<div class="bg-violet-600 text-white rounded p-1 mb-1 text-[11px] font-black text-center shadow-sm relative">MA - MALATTIA<button onclick="event.stopPropagation();apriModalCopia('${a.id}')" class="absolute top-0 right-0 bg-blue-500 hover:bg-blue-600 text-white text-[8px] px-1 rounded-bl" title="Copia"><i class="fa-solid fa-copy"></i></button><button onclick="event.stopPropagation();apriModalModificaAttivita('${a.id}')" class="absolute top-0 left-0 bg-amber-500 hover:bg-amber-600 text-white text-[8px] px-1 rounded-br" title="Modifica"><i class="fa-solid fa-pen"></i></button></div>`;else if(a.tipo==='RC')html+=`<div class="bg-teal-600 text-white rounded p-1 mb-1 text-[11px] font-black text-center shadow-sm relative">RC - RIPOSO COMP.<button onclick="event.stopPropagation();apriModalCopia('${a.id}')" class="absolute top-0 right-0 bg-blue-500 hover:bg-blue-600 text-white text-[8px] px-1 rounded-bl" title="Copia"><i class="fa-solid fa-copy"></i></button><button onclick="event.stopPropagation();apriModalModificaAttivita('${a.id}')" class="absolute top-0 left-0 bg-amber-500 hover:bg-amber-600 text-white text-[8px] px-1 rounded-br" title="Modifica"><i class="fa-solid fa-pen"></i></button></div>`;else if(a.tipo==='RF')html+=`<div class="bg-emerald-600 text-white rounded p-1 mb-1 text-[11px] font-bold shadow-sm relative"><div class="font-bold">RF - Riposo Fis.</div><div class="text-[10px] font-semibold">${a.ore}h ${a.min}m</div><button onclick="event.stopPropagation();apriModalCopia('${a.id}')" class="absolute top-0 right-0 bg-blue-500 hover:bg-blue-600 text-white text-[8px] px-1 rounded-bl" title="Copia"><i class="fa-solid fa-copy"></i></button><button onclick="event.stopPropagation();apriModalModificaAttivita('${a.id}')" class="absolute top-0 left-0 bg-amber-500 hover:bg-amber-600 text-white text-[8px] px-1 rounded-br" title="Modifica"><i class="fa-solid fa-pen"></i></button></div>`;else if(a.tipo==='FA')html+=`<div class="bg-slate-600 text-white rounded p-1 mb-1 text-[11px] font-bold shadow-sm relative"><div class="font-bold">${a.tipo}</div>${(a.ore||a.min)?`<div class="text-[10px] font-semibold">${a.ore}h ${a.min}m</div>`:''}<button onclick="event.stopPropagation();apriModalCopia('${a.id}')" class="absolute top-0 right-0 bg-blue-500 hover:bg-blue-600 text-white text-[8px] px-1 rounded-bl" title="Copia"><i class="fa-solid fa-copy"></i></button><button onclick="event.stopPropagation();apriModalModificaAttivita('${a.id}')" class="absolute top-0 left-0 bg-amber-500 hover:bg-amber-600 text-white text-[8px] px-1 rounded-br" title="Modifica"><i class="fa-solid fa-pen"></i></button></div>`;else if(a.tipo==='ODM'){const oreNorm=a.oreNorm||0;const minNorm=a.minNorm||0;const oreSpec=a.oreSpec||0;const minSpec=a.minSpec||0;const extraInfo=(oreNorm>0||minNorm>0||oreSpec>0||minSpec>0)?`<div class="text-[9px] text-slate-500">N:${oreNorm}h${minNorm}m S:${oreSpec}h${minSpec}m</div>`:'';html+=`<div class="bg-sky-100 border border-sky-300 text-sky-950 rounded p-1 mb-1 text-[11px] shadow-sm relative"><div class="font-bold">OdM: ${a.odm}</div><div class="text-[10px] text-slate-600 truncate line-clamp-2">${a.desc||''}</div><div class="text-[10px] text-sky-800 font-semibold">${a.ore}h ${a.min}m (OP:${a.op})</div>${extraInfo}<button onclick="event.stopPropagation();apriModalCopia('${a.id}')" class="absolute top-0 right-0 bg-blue-500 hover:bg-blue-600 text-white text-[8px] px-1 rounded-bl" title="Copia"><i class="fa-solid fa-copy"></i></button><button onclick="event.stopPropagation();apriModalModificaAttivita('${a.id}')" class="absolute top-0 left-0 bg-amber-500 hover:bg-amber-600 text-white text-[8px] px-1 rounded-br" title="Modifica"><i class="fa-solid fa-pen"></i></button></div>`;}});let minutiLavoroTotali=0;atts.filter(a=>a.tipo==='ODM').forEach(a=>minutiLavoroTotali+=((a.ore||0)*60+(a.min||0)));if(minutiLavoroTotali>0){let minutiStraordinario=0;if(!isGiornoLavorativoStandard)minutiStraordinario=minutiLavoroTotali;else if(minutiLavoroTotali>MINUTI_GIORNATA_STANDARD)minutiStraordinario=minutiLavoroTotali-MINUTI_GIORNATA_STANDARD;if(minutiStraordinario>0){const hStr=Math.floor(minutiStraordinario/60);const mStr=minutiStraordinario%60;html+=`<div class="bg-orange-200 border border-orange-400 text-rose-900 rounded p-1 mb-1 text-[11px] font-bold text-center shadow-sm"><i class="fa-solid fa-clock mr-1"></i> Straord: ${hStr}h ${mStr}m</div>`;}}}else if(!festNomePersona&&!statoRep.isReperibile&&statoRep.tipo!=='DEL'){html+=`<div class="text-[11px] text-slate-400 italic text-center py-2">+ Add</div>`;}if(statoRep.isReperibile){if(statoRep.tipo==='AUTO')html+=`<div class="badge-reperibilita-fisso bg-rose-600 text-white rounded p-1 text-[11px] font-bold shadow-sm flex items-center justify-center gap-1"><i class="fa-solid fa-phone"></i> H24</div>`;else if(statoRep.tipo==='ADD')html+=`<div class="badge-reperibilita-fisso bg-amber-600 text-white rounded p-1 text-[11px] font-bold shadow-sm flex items-center justify-center gap-1"><i class="fa-solid fa-user-plus"></i> Man.</div>`;}else if(statoRep.tipo==='DEL'){html+=`<div class="badge-reperibilita-fisso bg-slate-300 text-slate-700 rounded p-1 text-[10px] font-bold text-center border border-slate-400"><i class="fa-solid fa-phone-slash mr-1"></i> Annullata</div>`;}html+=`</td>`;});html+=`</tr>`;});html+=`</tbody></table>`;container.innerHTML=html;}
+function renderVistaMensile(container,listaDip){const listaOrdinata = ordinaDipendenti(listaDip);const anno=dataRiferimento.getFullYear();const mese=dataRiferimento.getMonth();const giorniInMese=new Date(anno,mese+1,0).getDate();const giorniSettimana=['DOM','LUN','MAR','MER','GIO','VEN','SAB'];const mesiNomi=['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];document.getElementById('labelFinestraData').textContent=`Mese completo: ${dataRiferimento.toLocaleDateString('it-IT',{month:'long',year:'numeric'})}`;let html=`<table class="w-full text-left border-collapse border border-slate-200 text-xs"><thead><tr class="bg-slate-800 text-white font-bold"><th class="p-2 border border-slate-700 w-48">Dipendente</th>`;const oggi=new Date();oggi.setHours(0,0,0,0);for(let g=1;g<=giorniInMese;g++){const d=new Date(anno,mese,g);const isWeekend=(d.getDay()===0||d.getDay()===6);const festNome=getFestivitaPerDipendente(d,'Tutte');const isEvidenziato=isWeekend||!!festNome;const dataCorrente=new Date(d);dataCorrente.setHours(0,0,0,0);const isOggi=dataCorrente.getTime()===oggi.getTime();const settCons=trovaSettimanaConsuntivazione(dataCorrente);const labelSettCons=settCons?`w${formatoOrdinaleSettimana(settCons.numero)}`:'';html+=`<th class="p-1 border border-slate-700 text-center text-[11px] w-8 header-giorno ${isEvidenziato?'evidenziato':''} ${isOggi?'oggi':''}"><div style="font-size:14px;font-weight:800;color:#000000;">${g}</div><span class="text-[9px] font-normal opacity-80">${giorniSettimana[d.getDay()]}</span>${labelSettCons?`<br><span class="text-[8px] font-bold">${labelSettCons}</span>`:''}</th>`;}html+=`</tr></thead><tbody>`;listaOrdinata.forEach(dip=>{html+=`<tr><td class="p-2 bg-slate-50 border border-slate-200 font-semibold text-[12px]">${dip.cognome} ${dip.nome}</td>`;for(let g=1;g<=giorniInMese;g++){const d=new Date(anno,mese,g);const isoData=dataLocaleToString(d);const atts=attivitaCalendario.filter(a=>a.cid===dip.cid&&a.data===isoData);const haAssenzaGiornata=atts.some(a=>a.tipo==='FE'||a.tipo==='RC'||a.tipo==='MA');const haRF=atts.some(a=>a.tipo==='RF');const festNome=getFestivitaPerDipendente(d,dip.sedeLavoro);const isWeekend=(d.getDay()===0||d.getDay()===6);const statoRep=getStatoReperibilitaEffettivo(dip.cid,d);let contenutoCella='-';let bgCell="bg-white text-slate-300";let badgeHtml='';if(haAssenzaGiornata){const tipoAssenza=atts.find(a=>a.tipo==='FE'||a.tipo==='RC'||a.tipo==='MA').tipo;if(tipoAssenza==='MA'){bgCell="bg-violet-600 text-white font-bold";}else{bgCell="bg-slate-600 text-white font-bold";}contenutoCella=tipoAssenza;}else if(haRF){bgCell="bg-emerald-600 text-white font-bold";contenutoCella='RF';}else if(statoRep.isReperibile){bgCell=statoRep.tipo==='ADD'?"bg-amber-500 text-white font-bold":"bg-rose-500 text-white font-bold";contenutoCella='R';}if(atts.length>0&&!haAssenzaGiornata&&!haRF){badgeHtml=`<div class="badge-attivita">${atts.length}</div>`;}if(atts.length===0&&!haAssenzaGiornata&&!haRF&&!statoRep.isReperibile){if(festNome)bgCell="bg-rose-100 text-rose-900 font-bold";else if(isWeekend)bgCell="bg-amber-100 text-amber-900 font-bold";}html+=`<td onclick="apriModalAttivita('${dip.cid}','${isoData}')" class="p-0.5 border border-slate-200 text-center text-[11px] cursor-pointer cella-calendario-mese ${bgCell}">${badgeHtml}${contenutoCella}</td>`;}html+=`</tr>`;});html+=`</tbody></table>`;container.innerHTML=html;}
 function apriModalAttivita(cid,isoData){modalitaCID=cid;modalitaData=isoData;modalitaModifica=false;document.getElementById('modificaAttId').value='';document.getElementById('modalTitolo').textContent='Assegna Attività';document.getElementById('btnSalvaAttivita').textContent='Applica';const dip=dipendenti.find(d=>d.cid===cid);const dateObj=parseLocalDate(isoData);const statoRep=getStatoReperibilitaEffettivo(cid,dateObj);document.getElementById('mNomeDip').textContent=dip?(dip.cognome+' '+dip.nome):'---';document.getElementById('mData').textContent=isoData;document.getElementById('mSede').textContent=dip?(dip.sedeLavoro||'---'):'---';const infoBox=document.getElementById('mInfoReperibAuto');if(statoRep.isReperibile){if(statoRep.tipo==='AUTO')infoBox.textContent="Stato Reperibilità: ATTIVA DA ROTAZIONE (Gruppo "+dip.turnoRep+")";else infoBox.textContent="Stato Reperibilità: INSERITA MANUALE";}else if(statoRep.tipo==='DEL')infoBox.textContent="Stato Reperibilità: CANCELLATA MANUALE";else infoBox.textContent="Stato Reperibilità: Non in turno";renderListaModal();document.getElementById('modalAttivita').classList.remove('hidden');}
 function apriModalModificaAttivita(attId){const att=attivitaCalendario.find(a=>a.id===attId);if(!att)return;modalitaCID=att.cid;modalitaData=att.data;modalitaModifica=true;document.getElementById('modificaAttId').value=attId;document.getElementById('modalTitolo').textContent='Modifica Attività';document.getElementById('btnSalvaAttivita').textContent='Salva Modifiche';const dip=dipendenti.find(d=>d.cid===att.cid);const dateObj=parseLocalDate(att.data);const statoRep=getStatoReperibilitaEffettivo(att.cid,dateObj);document.getElementById('mNomeDip').textContent=dip?(dip.cognome+' '+dip.nome):'---';document.getElementById('mData').textContent=att.data;document.getElementById('mSede').textContent=dip?(dip.sedeLavoro||'---'):'---';const infoBox=document.getElementById('mInfoReperibAuto');if(statoRep.isReperibile){if(statoRep.tipo==='AUTO')infoBox.textContent="Stato Reperibilità: ATTIVA DA ROTAZIONE (Gruppo "+dip.turnoRep+")";else infoBox.textContent="Stato Reperibilità: INSERITA MANUALE";}else if(statoRep.tipo==='DEL')infoBox.textContent="Stato Reperibilità: CANCELLATA MANUALE";else infoBox.textContent="Stato Reperibilità: Non in turno";document.getElementById('mTipo').value=att.tipo;document.getElementById('mODM').value=att.odm||'';document.getElementById('mDescrizione').value=att.desc||'';document.getElementById('mOre').value=att.ore||0;document.getElementById('mMin').value=att.min||0;document.getElementById('mOP').value=att.op||'0010';document.getElementById('mOreNorm').value=att.oreNorm||0;document.getElementById('mMinNorm').value=att.minNorm||0;document.getElementById('mOreSpec').value=att.oreSpec||0;document.getElementById('mMinSpec').value=att.minSpec||0;toggleFormTipoModal();renderListaModal();document.getElementById('modalAttivita').classList.remove('hidden');}
 function chiudiModalAttivita(){document.getElementById('modalAttivita').classList.add('hidden');document.getElementById('formNuovaAttivita').reset();document.getElementById('modificaAttId').value='';modalitaModifica=false;toggleFormTipoModal();aggiornaCalendario();}

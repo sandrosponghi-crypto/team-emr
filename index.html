@@ -44,21 +44,25 @@ function parseLocalDate(dateStr) {
     return new Date(dateStr);
 }
 
-// ✅ ORDINAMENTO UNIFORME: MSP, Sede, Cognome, Nome
+// ✅ ORDINAMENTO UNIFORME: DIST., Sede, Cognome, Nome
 function ordinaDipendenti(lista) {
     return [...lista].sort((a, b) => {
-        const mspA = (a.msp || '').toUpperCase();
-        const mspB = (b.msp || '').toUpperCase();
-        if (mspA !== mspB) return mspA.localeCompare(mspB, 'it');
+        // 1. DISTACCAMENTO
+        const distA = (a.distaccamento || '').toUpperCase();
+        const distB = (b.distaccamento || '').toUpperCase();
+        if (distA !== distB) return distA.localeCompare(distB, 'it');
         
+        // 2. SEDE
         const sedeA = (a.sedeLavoro || '').toUpperCase();
         const sedeB = (b.sedeLavoro || '').toUpperCase();
         if (sedeA !== sedeB) return sedeA.localeCompare(sedeB, 'it');
         
+        // 3. COGNOME
         const cognA = (a.cognome || '').toUpperCase();
         const cognB = (b.cognome || '').toUpperCase();
         if (cognA !== cognB) return cognA.localeCompare(cognB, 'it');
         
+        // 4. NOME
         const nomeA = (a.nome || '').toUpperCase();
         const nomeB = (b.nome || '').toUpperCase();
         return nomeA.localeCompare(nomeB, 'it');

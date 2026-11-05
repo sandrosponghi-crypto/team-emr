@@ -59,7 +59,6 @@ function ordinaDipendenti(lista) {
     });
 }
 
-// ✅ FUNZIONE CORRETTA: Carica file OdM Excel
 function caricaFileOdM(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -76,8 +75,6 @@ function caricaFileOdM(event) {
             let count = 0;
             let skipped = 0;
             
-            console.log('📊 Righe totali nel file:', jsonData.length);
-            
             for (let i = 0; i < jsonData.length; i++) {
                 const row = jsonData[i];
                 if (!row || row.length < 6) { skipped++; continue; }
@@ -87,7 +84,6 @@ function caricaFileOdM(event) {
                 const unita = String(row[4] || '').trim();
                 const stSis = String(row[5] || '').trim();
                 
-                // Salta intestazioni multiple e righe vuote
                 if (odm === 'OdM' || odm === '' || odm === '---' || isNaN(parseInt(odm))) {
                     skipped++;
                     continue;
@@ -123,12 +119,11 @@ function caricaFileOdM(event) {
     event.target.value = '';
 }
 
-// ✅ FUNZIONE CORRETTA: Valida un OdM
 function validaOdM(odm, op, cdlDipendente) {
-    if (!odm || odm.trim() === '') {
+    if (!odm || String(odm).trim() === '') {
         return { valido: true, motivo: 'Nessun OdM inserito', tipo: 'info' };
     }
-    if (!op || op.trim() === '') {
+    if (!op || String(op).trim() === '') {
         return { valido: false, motivo: 'Operazione (OP) mancante', tipo: 'errore' };
     }
     
@@ -167,6 +162,51 @@ function aggiornaContatoreOdM() {
     }
 }
 
+// ✅ FIX CRITICO: Normalizza i dati caricati da Google Sheets (i numeri rimangono numeri)
+function normalizzaDatiCaricati() {
+    dipendenti = dipendenti.map(d => ({
+        ...d,
+        cid: String(d.cid || '').trim(),
+        ore: Number(d.ore || 0),
+        min: Number(d.min || 0),
+        oreNorm: Number(d.oreNorm || 0),
+        minNorm: Number(d.minNorm || 0),
+        oreSpec: Number(d.oreSpec || 0),
+        minSpec: Number(d.minSpec || 0),
+        turnoRep: d.turnoRep ? String(d.turnoRep).trim() : '',
+        ingressoMS: d.ingressoMS ? String(d.ingressoMS).trim() : '',
+        decorrenzaInq: d.decorrenzaInq ? String(d.decorrenzaInq).trim() : ''
+    }));
+    
+    consuntivazioneData = consuntivazioneData.map(c => ({
+        ...c,
+        cid: String(c.cid || '').trim(),
+        ore: Number(c.ore || 0),
+        min: Number(c.min || 0),
+        oreNorm: Number(c.oreNorm || 0),
+        minNorm: Number(c.minNorm || 0),
+        oreSpec: Number(c.oreSpec || 0),
+        minSpec: Number(c.minSpec || 0)
+    }));
+    
+    attivitaCalendario = attivitaCalendario.map(a => ({
+        ...a,
+        cid: String(a.cid || '').trim(),
+        ore: Number(a.ore || 0),
+        min: Number(a.min || 0),
+        oreNorm: Number(a.oreNorm || 0),
+        minNorm: Number(a.minNorm || 0),
+        oreSpec: Number(a.oreSpec || 0),
+        minSpec: Number(a.minSpec || 0)
+    }));
+    
+    festivitaCustom = festivitaCustom.map(f => ({
+        ...f,
+        giorno: Number(f.giorno || 0),
+        mese: Number(f.mese || 0)
+    }));
+}
+
 async function loadDataFromSheets() {
     if (window.isLoadingData) return;
     window.isLoadingData = true;
@@ -192,9 +232,14 @@ async function loadDataFromSheets() {
         schemaNominativiRaw = data.team_schema_nominativi_db || {};
         MATRICE_REPERIBILITA = data.team_matrice_reperibilita_db || {};
         
+        // ✅ FIX: Normalizza i tipi dei dati dopo il caricamento
+        normalizzaDatiCaricati();
+        
         window.dbData = data;
 
         console.log('📊 Dipendenti caricati:', dipendenti.length);
+        console.log('📊 Festività caricate:', festivitaCustom.length);
+        console.log('📊 Attività caricate:', attivitaCalendario.length);
         
         if(window.startApp) window.startApp();
         
@@ -525,6 +570,7 @@ async function saveDataToSheets(key, data) {
 </main>
 </div>
 
+<!-- I modali rimangono invariati per brevità -->
 <div id="modalAttivita" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden flex items-center justify-center z-50 p-4"><div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-5 border border-slate-200 space-y-4 modal-scroll"><div class="flex justify-between items-center border-b pb-2"><h3 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-calendar-plus text-blue-600"></i> <span id="modalTitolo">Assegna Attività</span></h3><button type="button" onclick="chiudiModalAttivita()" class="text-slate-400 hover:text-slate-600 text-lg"><i class="fa-solid fa-xmark"></i></button></div><div class="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs space-y-1"><div><strong>Dipendente:</strong> <span id="mNomeDip" class="text-blue-700 font-bold">---</span></div><div><strong>Data:</strong> <span id="mData" class="text-slate-700 font-semibold">---</span> | <strong>Sede:</strong> <span id="mSede" class="font-bold text-amber-800">---</span></div><div id="mInfoReperibAuto" class="text-[11px] font-bold text-rose-700 pt-1"></div></div><div><label class="block text-xs font-bold text-slate-600 uppercase mb-2">Inserimenti ed Eccezioni del Giorno:</label><div id="mListaAttivita" class="space-y-2 max-h-40 overflow-y-auto p-1"></div></div><form id="formNuovaAttivita" onsubmit="salvaAttivitaModal(event)" class="border-t pt-3 space-y-3"><input type="hidden" id="modificaAttId" value=""><div class="grid grid-cols-2 gap-2"><div><label class="block text-[11px] font-bold text-slate-600 uppercase">Causale / Tipo *</label><select id="mTipo" onchange="toggleFormTipoModal()" class="w-full border rounded px-2 py-1 text-xs font-bold"><option value="ODM">Lavoro con OdM</option><option value="FE">FE - Ferie</option><option value="MA">MA - Malattia</option><option value="RC">RC - Riposo Compensativo</option><option value="RF">RF - Riposo Fisiologico</option><option value="FA">FA - Ex Festività</option><option value="REPERIBILE_ADD">Aggiungi Reperibilità</option><option value="REPERIBILE_DEL">CANCELLA Reperibilità</option></select></div><div id="boxODM"><label class="block text-[11px] font-bold text-slate-600 uppercase">OdM / NTW *</label><input type="text" id="mODM" placeholder="4001234567" class="w-full border rounded px-2 py-1 text-xs font-semibold" list="datalistODM" autocomplete="on"></div></div><div id="boxDescrizione"><label class="block text-[11px] font-bold text-slate-600 uppercase">Descrizione / Note</label><input type="text" id="mDescrizione" class="w-full border rounded px-2 py-1 text-xs font-semibold" list="datalistDescrizione" autocomplete="on"></div><div id="boxDurata" class="grid grid-cols-2 gap-2"><div><label class="block text-[11px] font-bold text-slate-600 uppercase">Durata Ore / Minuti *</label><div class="flex items-center gap-1"><input type="number" id="mOre" min="0" max="24" value="7" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"><span class="font-bold text-slate-400">:</span><input type="number" id="mMin" min="0" max="59" value="36" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"></div></div><div id="boxOP"><label class="block text-[11px] font-bold text-slate-600 uppercase">Operazione (OP)</label><input type="text" id="mOP" value="0010" class="w-full border rounded px-2 py-1 text-xs font-semibold"></div></div><div id="boxOreSpeciali" class="grid grid-cols-2 gap-2 bg-blue-50 p-2 rounded border border-blue-200"><div><label class="block text-[11px] font-bold text-blue-800 uppercase">Ore Norm / Min Norm</label><div class="flex items-center gap-1"><input type="number" id="mOreNorm" min="0" max="24" value="0" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"><span class="font-bold text-slate-400">:</span><input type="number" id="mMinNorm" min="0" max="59" value="0" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"></div></div><div><label class="block text-[11px] font-bold text-purple-800 uppercase">Ore Spec / Min Spec</label><div class="flex items-center gap-1"><input type="number" id="mOreSpec" min="0" max="24" value="0" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"><span class="font-bold text-slate-400">:</span><input type="number" id="mMinSpec" min="0" max="59" value="0" class="w-1/2 border rounded px-2 py-1 text-xs font-bold text-center"></div></div><div class="col-span-2 text-[11px] text-slate-600 italic" id="mValidazioneOre"></div></div><div class="flex justify-end gap-2 pt-2"><button type="button" onclick="chiudiModalAttivita()" class="px-3 py-1.5 rounded text-xs font-semibold bg-slate-200 text-slate-700 hover:bg-slate-300">Chiudi</button><button type="submit" class="px-4 py-1.5 rounded text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 shadow" id="btnSalvaAttivita">Applica</button></div></form></div></div>
 
 <div id="modalCopiaAttivita" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden flex items-center justify-center z-[60] p-4"><div class="bg-white rounded-xl shadow-2xl max-w-md w-full p-5 border border-slate-200 space-y-4"><div class="flex justify-between items-center border-b pb-2"><h3 class="font-bold text-slate-800 text-base flex items-center gap-2"><i class="fa-solid fa-copy text-blue-600"></i> Copia Attività</h3><button type="button" onclick="chiudiModalCopia()" class="text-slate-400 hover:text-slate-600 text-lg"><i class="fa-solid fa-xmark"></i></button></div><div class="bg-blue-50 p-3 rounded-lg border border-blue-200 text-xs"><div><strong>Attività originale:</strong> <span id="copiaInfoAtt" class="text-blue-700 font-bold">---</span></div><div><strong>Data:</strong> <span id="copiaInfoData" class="text-slate-700 font-semibold">---</span></div></div><form id="formCopiaAttivita" onsubmit="confermaCopiaAttivita(event)" class="space-y-3"><input type="hidden" id="copiaAttId"><div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Nuova Data *</label><input type="date" id="copiaNuovaData" required class="w-full border rounded px-2 py-1 text-xs font-bold"></div><div><label class="block text-[11px] font-bold text-slate-600 uppercase mb-1">Nuovo Dipendente (opzionale)</label><select id="copiaNuovoDip" class="w-full border rounded px-2 py-1 text-xs font-bold"><option value="">-- Mantieni stesso dipendente --</option></select></div><div class="flex items-center gap-2"><input type="checkbox" id="copiaEliminaOriginale" class="rounded"><label for="copiaEliminaOriginale" class="text-xs font-semibold text-slate-700">Elimina attività originale dopo la copia</label></div><div class="flex justify-end gap-2 pt-2"><button type="button" onclick="chiudiModalCopia()" class="px-3 py-1.5 rounded text-xs font-semibold bg-slate-200 text-slate-700 hover:bg-slate-300">Annulla</button><button type="submit" class="px-4 py-1.5 rounded text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 shadow">Copia</button></div></form></div></div>
@@ -558,6 +604,7 @@ let modalitaModifica=false;
 
 window.startApp = function() {
     console.log('🚀 Avvio app con dati da Google Sheets...');
+    
     if (schemaNominativiRaw && !schemaNominativiRaw['EEMM2'] && schemaNominativiRaw.tecnici) {
         schemaNominativi['EEMM2'] = { tecnici: schemaNominativiRaw.tecnici || [], operativi: schemaNominativiRaw.operativi || [] };
     } else if (schemaNominativiRaw) {
@@ -568,6 +615,7 @@ window.startApp = function() {
             operativi: [{gruppo:1,cid:'00256375'},{gruppo:1,cid:'00452743'},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:2,cid:'00255747'},{gruppo:2,cid:'00435117'},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:3,cid:''},{gruppo:3,cid:'00454542'},{gruppo:3,cid:'00256676'},{gruppo:3,cid:''},{gruppo:3,cid:''},{gruppo:3,cid:''},{gruppo:4,cid:''},{gruppo:4,cid:'00250970'},{gruppo:4,cid:'00256244'},{gruppo:4,cid:''},{gruppo:4,cid:''},{gruppo:4,cid:''}]
         };
     }
+    
     if (typeof popolaAnniIniziali === 'function') popolaAnniIniziali();
     if (typeof popolaSelettoreAnniSchema === 'function') popolaSelettoreAnniSchema();
     if (typeof popolaFiltroMSP === 'function') popolaFiltroMSP();
@@ -581,11 +629,13 @@ window.startApp = function() {
     if (typeof aggiornaCalendario === 'function') aggiornaCalendario();
     if (typeof aggiornaSchemaNominativi === 'function') aggiornaSchemaNominativi();
     if (typeof cambiaTab === 'function') cambiaTab('calendario');
+    
     document.getElementById('odmStatusIndicator').classList.remove('hidden');
     aggiornaContatoreOdM();
 };
 
 window.syncToFirebase = function(key, data) { saveDataToSheets(key, data); };
+
 window.doLogin = function() {
     const pass = document.getElementById('loginPassword').value;
     const errEl = document.getElementById('loginError');
@@ -598,9 +648,15 @@ window.doLogin = function() {
         errEl.style.display = 'block';
     }
 };
+
 window.doLogout = function() { location.reload(); };
 
-function formattaCID(cid){if(!cid&&cid!==0)return'';return String(cid).trim().padStart(8,'0');}
+// ✅ FIX CRITICO: formattaCID ora gestisce sia stringhe che numeri
+function formattaCID(cid){
+    if(!cid && cid !== 0) return '';
+    return String(cid).trim().padStart(8,'0');
+}
+
 function formatoOrdinaleSettimana(num){return num+'°';}
 function formattaDataExcel(valore){if(!valore)return'';const num=parseFloat(valore);if(isNaN(num)||num<1000)return valore;const data=new Date(Math.round((num-25569)*86400*1000));return`${String(data.getDate()).padStart(2,'0')}/${String(data.getMonth()+1).padStart(2,'0')}/${data.getFullYear()}`;}
 function normalizzaSede(sede){if(!sede)return'';const s=sede.trim().toLowerCase();const map={'re':'re','reggio emilia':'re','reggio':'re','pc':'pc','piacenza':'pc','pr':'pr','parma':'pr','mo':'mo','modena':'mo','bo':'bo','bologna':'bo','valsamoggia':'bo','fe':'fe','ferrara':'fe','ra':'ra','ravenna':'ra','fc':'fc','forlì':'fc','forli':'fc','forlì-cesena':'fc','forli-cesena':'fc','rn':'rn','rimini':'rn'};return map[s]||s;}
@@ -760,7 +816,6 @@ function aggiornaConsuntivazione(){
     importaDaCalendario(true);
 }
 
-// ✅ FUNZIONE CORRETTA: renderTabellaConsuntivazione con validazione OdM
 function renderTabellaConsuntivazione(anno,mese,settimana,cdl,msp,tipoReport){
     const tbody=document.getElementById('tabellaConsuntivazione');
     const tfoot=document.getElementById('piedeConsuntivazione');
@@ -820,7 +875,6 @@ function renderTabellaConsuntivazione(anno,mese,settimana,cdl,msp,tipoReport){
         }
     });
     
-    // Aggiorna indicatore con riepilogo validazione
     if (dbCount > 0) {
         document.getElementById('odmStatusIndicator').innerHTML = `
             <div class="flex items-center gap-2 flex-wrap">
@@ -912,7 +966,6 @@ function cambiaTab(tabId){
 }
 
 function aggiornaVisibilitaFiltriCalendario(){const controlliNav=document.getElementById('controlliNavigazione');const filtroAnno=document.getElementById('filtroAnnoGroup');const filtroMese=document.getElementById('filtroMeseGroup');const filtroMSP=document.getElementById('filtroMSPGroup');const filtroCerca=document.getElementById('filtroCercaGroup');const pulsantiExcel=document.getElementById('pulsantiExcelCalendario');if(vistaAttuale==='annuale'){if(controlliNav)controlliNav.style.display='none';if(filtroAnno)filtroAnno.style.display='flex';if(filtroMese)filtroMese.style.display='none';if(filtroMSP)filtroMSP.style.display='none';if(filtroCerca)filtroCerca.style.display='none';if(pulsantiExcel)pulsantiExcel.classList.remove('hidden');}else if(vistaAttuale==='mese'){if(controlliNav)controlliNav.style.display='none';if(filtroAnno)filtroAnno.style.display='flex';if(filtroMese)filtroMese.style.display='flex';if(filtroMSP)filtroMSP.style.display='flex';if(filtroCerca)filtroCerca.style.display='none';if(pulsantiExcel)pulsantiExcel.classList.add('hidden');}else{if(controlliNav)controlliNav.style.display='flex';if(filtroAnno)filtroAnno.style.display='flex';if(filtroMese)filtroMese.style.display='flex';if(filtroMSP)filtroMSP.style.display='flex';if(filtroCerca)filtroCerca.style.display='flex';if(pulsantiExcel)pulsantiExcel.classList.add('hidden');}}
-
 function renderDipendenti(){console.log('🎨 renderDipendenti eseguito. Dipendenti trovati:', dipendenti ? dipendenti.length : 0);const tbody=document.getElementById('tabellaDipendenti');if(!tbody){console.error('❌ Impossibile trovare tabellaDipendenti nel DOM!');return;}tbody.innerHTML='';const dipendentiOrdinati = ordinaDipendenti(dipendenti);dipendentiOrdinati.forEach(d=>{const tr=document.createElement('tr');tr.className="hover:bg-slate-50 border-b border-slate-200";tr.innerHTML=`<td class="p-2 font-mono font-bold border-r border-slate-200">${formattaCID(d.cid)}</td><td class="p-2 font-semibold border-r border-slate-200">${d.cognome} ${d.nome}</td><td class="p-2 font-bold text-blue-700 border-r border-slate-200">${d.msp||''}</td><td class="p-2 font-mono border-r border-slate-200">${d.cdL||''}</td><td class="p-2 text-center border-r border-slate-200"><span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${d.classe==='O'?'bg-amber-100 text-amber-800':(d.classe==='Q'?'bg-purple-100 text-purple-800':'bg-blue-100 text-blue-800')}">${d.classe}</span></td><td class="p-2 text-center border-r border-slate-200">${d.distaccamento||''}</td><td class="p-2 text-center border-r border-slate-200 font-bold">${d.pat||'-'}</td><td class="p-2 text-center border-r border-slate-200 font-bold text-amber-800">${d.turnoRep||'-'}</td><td class="p-2 text-center border-r border-slate-200">${d.sedeLavoro||''}</td><td class="p-2 border-r border-slate-200 truncate max-w-[120px]" title="${d.residenza||''}">${d.residenza||''}</td><td class="p-2 border-r border-slate-200 font-mono text-[10px]">${d.cellLavoro||''}</td><td class="p-2 border-r border-slate-200 truncate max-w-[130px]" title="${d.email||''}">${d.email||''}</td><td class="p-2 border-r border-slate-200 text-[10px]">${formattaDataExcel(d.ingressoMS)}</td><td class="p-2 border-r border-slate-200 text-[10px]">${formattaDataExcel(d.decorrenzaInq)}</td><td class="p-2 border-r border-slate-200 font-bold text-[10px]">${d.inq||''}</td><td class="p-2 text-center space-x-1"><button onclick="apriModalModificaDip('${d.cid}')" class="text-blue-600 hover:text-blue-800 p-1"><i class="fa-solid fa-pen-to-square"></i></button><button onclick="rimuoviDipendente('${d.cid}')" class="text-rose-600 hover:text-rose-800 p-1"><i class="fa-solid fa-trash-can"></i></button></td>`;tbody.appendChild(tr);});aggiornaIndicatoreSpazio();}
 function apriModalModificaDip(cid){const d=dipendenti.find(x=>x.cid===cid);if(!d)return;document.getElementById('editCID_old').value=d.cid;document.getElementById('editCID').value=d.cid;document.getElementById('editCognome').value=d.cognome;document.getElementById('editNome').value=d.nome;document.getElementById('editSuffisso').value=d.suffisso_email||'';document.getElementById('editMSP').value=d.msp||'';document.getElementById('editCdL').value=d.cdL||'';document.getElementById('editClasse').value=d.classe;document.getElementById('editDistaccamento').value=d.distaccamento||'';document.getElementById('editPat').value=d.pat||'';document.getElementById('editTurnoRep').value=d.turnoRep||'';document.getElementById('editSedeLavoro').value=d.sedeLavoro||'RE';document.getElementById('editResidenza').value=d.residenza||'';document.getElementById('editCellLavoro').value=d.cellLavoro||'';document.getElementById('editCellPrivato').value=d.cellPrivato||'';document.getElementById('editEmail').value=d.email||'';document.getElementById('editIngressoMS').value=formattaDataExcel(d.ingressoMS);document.getElementById('editQuiescenza').value=formattaDataExcel(d.quiescenza);document.getElementById('editDecorrenzaInq').value=formattaDataExcel(d.decorrenzaInq);document.getElementById('editInq').value=d.inq||'';document.getElementById('modalModificaDip').classList.remove('hidden');}
 function chiudiModalModificaDip(){document.getElementById('modalModificaDip').classList.add('hidden');}
@@ -945,7 +998,15 @@ function rimuoviAttivita(id){attivitaCalendario=attivitaCalendario.filter(a=>a.i
 function apriModalCopia(attId){const att=attivitaCalendario.find(a=>a.id===attId);if(!att)return;document.getElementById('copiaAttId').value=attId;document.getElementById('copiaInfoAtt').textContent=`${att.tipo} - ${att.odm||''} ${att.ore}h${att.min}m`;document.getElementById('copiaInfoData').textContent=att.data;document.getElementById('copiaNuovaData').value=att.data;document.getElementById('copiaEliminaOriginale').checked=false;const selectDip=document.getElementById('copiaNuovoDip');selectDip.innerHTML='<option value="">-- Mantieni stesso dipendente --</option>';dipendenti.forEach(d=>{const opt=document.createElement('option');opt.value=d.cid;opt.textContent=`${d.cognome} ${d.nome} (${d.msp})`;if(d.cid===att.cid)opt.selected=true;selectDip.appendChild(opt);});document.getElementById('modalCopiaAttivita').classList.remove('hidden');}
 function chiudiModalCopia(){document.getElementById('modalCopiaAttivita').classList.add('hidden');}
 function confermaCopiaAttivita(e){e.preventDefault();const attId=document.getElementById('copiaAttId').value;const nuovaData=document.getElementById('copiaNuovaData').value;const nuovoDip=document.getElementById('copiaNuovoDip').value;const eliminaOriginale=document.getElementById('copiaEliminaOriginale').checked;const attOriginale=attivitaCalendario.find(a=>a.id===attId);if(!attOriginale)return;const cidDestinatario=nuovoDip||attOriginale.cid;const nuovaAtt={id:Date.now().toString(),cid:cidDestinatario,data:nuovaData,tipo:attOriginale.tipo,odm:attOriginale.odm||'',desc:attOriginale.desc||'',ore:attOriginale.ore||0,min:attOriginale.min||0,op:attOriginale.op||'',oreNorm:attOriginale.oreNorm||0,minNorm:attOriginale.minNorm||0,oreSpec:attOriginale.oreSpec||0,minSpec:attOriginale.minSpec||0};const tipiAssenzaGiornata=['FE','RC','MA'];const attsGiornoDest=attivitaCalendario.filter(a=>a.cid===cidDestinatario&&a.data===nuovaData);if(tipiAssenzaGiornata.includes(nuovaAtt.tipo)&&attsGiornoDest.length>0){alert(`Impossibile copiare ${nuovaAtt.tipo}: il dipendente ha già attività in data ${nuovaData}.`);return;}if(attsGiornoDest.some(a=>tipiAssenzaGiornata.includes(a.tipo))){alert(`Impossibile copiare: il dipendente è già in assenza intera giornata (FE/RC/MA) in data ${nuovaData}.`);return;}attivitaCalendario.push(nuovaAtt);if(eliminaOriginale){attivitaCalendario=attivitaCalendario.filter(a=>a.id!==attId);}saveDataToSheets('team_attivita_db', attivitaCalendario);chiudiModalCopia();renderListaModal();aggiornaCalendario();aggiornaIndicatoreSpazio();aggiornaDatalistAutocompletamento();const msg=eliminaOriginale?'spostata':'copiata';alert(`✅ Attività ${msg} con successo!`);}
-function aggiornaDatalistAutocompletamento(){const odmUnici=[...new Set(attivitaCalendario.filter(a=>a.odm&&a.odm.trim()!=='').map(a=>a.odm))];const descUnici=[...new Set(attivitaCalendario.filter(a=>a.desc&&a.desc.trim()!=='').map(a=>a.desc))];const dlODM=document.getElementById('datalistODM');if(dlODM){dlODM.innerHTML=odmUnici.map(v=>`<option value="${v}">`).join('');}const dlDesc=document.getElementById('datalistDescrizione');if(dlDesc){dlDesc.innerHTML=descUnici.map(v=>`<option value="${v}">`).join('');}}
+function aggiornaDatalistAutocompletamento(){
+    // ✅ FIX: usa String() per gestire sia stringhe che numeri
+    const odmUnici=[...new Set(attivitaCalendario.filter(a=>a.odm && String(a.odm).trim()!=='').map(a=>String(a.odm).trim()))];
+    const descUnici=[...new Set(attivitaCalendario.filter(a=>a.desc && String(a.desc).trim()!=='').map(a=>String(a.desc).trim()))];
+    const dlODM=document.getElementById('datalistODM');
+    if(dlODM){dlODM.innerHTML=odmUnici.map(v=>`<option value="${v}">`).join('');}
+    const dlDesc=document.getElementById('datalistDescrizione');
+    if(dlDesc){dlDesc.innerHTML=descUnici.map(v=>`<option value="${v}">`).join('');}
+}
 function esportaDatabaseExcel(){const wb=XLSX.utils.book_new();const datiDip=[["CID","Cognome","Nome","Nominativo","Suffisso_Email","MSP","CdL","Classe","Distaccamento","Pat","TurnoRep","SedeLavoro","Residenza","CellLavoro","CellPrivato","Email","IngressoMS","Quiescenza","DecorrenzaInq","Inq"]];dipendenti.forEach(d=>datiDip.push([formattaCID(d.cid),d.cognome,d.nome,d.nominativo,d.suffisso_email,d.msp,d.cdL,d.classe,d.distaccamento,d.pat,d.turnoRep,d.sedeLavoro,d.residenza,d.cellLavoro,d.cellPrivato,d.email,d.ingressoMS,d.quiescenza,d.decorrenzaInq,d.inq]));XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiDip),"Dipendenti");const datiFest=[["ID","Nome","Giorno","Mese","Tipo","Sede"]];festivitaCustom.forEach(f=>datiFest.push([f.id,f.nome,f.giorno,f.mese,f.tipo,f.sede||'']));XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiFest),"Festivita");const datiAtt=[["ID","CID","Data","Tipo","OdM","Descrizione","Ore","Minuti","OP","OreNorm","MinNorm","OreSpec","MinSpec"]];attivitaCalendario.forEach(a=>datiAtt.push([a.id,formattaCID(a.cid),a.data,a.tipo,a.odm,a.desc,a.ore,a.min,a.op,a.oreNorm||0,a.minNorm||0,a.oreSpec||0,a.minSpec||0]));XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiAtt),"Attivita");const datiTurni=[["Anno","Settimana_ISO","Gruppo_Reperibilita"]];const anniOrdinati=Object.keys(MATRICE_REPERIBILITA).sort((a,b)=>a-b);anniOrdinati.forEach(anno=>{const sequenza=MATRICE_REPERIBILITA[anno];sequenza.forEach((gruppo,indexSettimana)=>{datiTurni.push([parseInt(anno),indexSettimana+1,gruppo]);});});XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiTurni),"Turni_Reperibilita");const datiCons=[["ID","CID","Data","ODM","OP","Ore","Min","OreNorm","MinNorm","OreSpec","MinSpec"]];consuntivazioneData.forEach(c=>datiCons.push([c.id,formattaCID(c.cid),c.data,c.odm,c.op,c.ore,c.min,c.oreNorm||0,c.minNorm||0,c.oreSpec||0,c.minSpec||0]));XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiCons),"Consuntivazione");XLSX.writeFile(wb,"Database_Completo_EM.xlsx");}
 function importaDatabaseExcel(e){const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=function(evt){try{const data=new Uint8Array(evt.target.result);const wb=XLSX.read(data,{type:'array'});if(wb.Sheets["Dipendenti"]){const jsonDip=XLSX.utils.sheet_to_json(wb.Sheets["Dipendenti"],{header:1}).slice(1);if(jsonDip.length>0){dipendenti=jsonDip.map(r=>({cid:formattaCID(String(r[0]||'')),cognome:String(r[1]||''),nome:String(r[2]||''),nominativo:String(r[3]||''),suffisso_email:String(r[4]||''),msp:String(r[5]||''),cdL:String(r[6]||''),classe:String(r[7]||''),distaccamento:String(r[8]||''),pat:String(r[9]||''),turnoRep:String(r[10]||''),sedeLavoro:String(r[11]||''),residenza:String(r[12]||''),cellLavoro:String(r[13]||''),cellPrivato:String(r[14]||''),email:String(r[15]||''),ingressoMS:formattaDataExcel(r[16]),quiescenza:formattaDataExcel(r[17]),decorrenzaInq:formattaDataExcel(r[18]),inq:String(r[19]||'')}));}}if(wb.Sheets["Festivita"]){const jsonFest=XLSX.utils.sheet_to_json(wb.Sheets["Festivita"],{header:1}).slice(1);if(jsonFest.length>0)festivitaCustom=jsonFest.map(r=>({id:String(r[0]||Date.now()),nome:String(r[1]||''),giorno:parseInt(r[2])||1,mese:parseInt(r[3])||0,tipo:String(r[4]||'PATRONO'),sede:String(r[5]||'')}));}if(wb.Sheets["Attivita"]){const jsonAtt=XLSX.utils.sheet_to_json(wb.Sheets["Attivita"],{header:1}).slice(1);if(jsonAtt.length>0)attivitaCalendario=jsonAtt.map(r=>({id:String(r[0]||Date.now()),cid:formattaCID(String(r[1]||'')),data:String(r[2]||''),tipo:String(r[3]||''),odm:String(r[4]||''),desc:String(r[5]||''),ore:parseInt(r[6])||0,min:parseInt(r[7])||0,op:String(r[8]||''),oreNorm:parseInt(r[9])||0,minNorm:parseInt(r[10])||0,oreSpec:parseInt(r[11])||0,minSpec:parseInt(r[12])||0}));}if(wb.Sheets["Turni_Reperibilita"]){const jsonTurni=XLSX.utils.sheet_to_json(wb.Sheets["Turni_Reperibilita"],{header:1}).slice(1);if(jsonTurni.length>0){MATRICE_REPERIBILITA={};jsonTurni.forEach(r=>{const anno=parseInt(r[0]);const settimana=parseInt(r[1]);const gruppo=parseInt(r[2]);if(anno&&settimana&&gruppo){if(!MATRICE_REPERIBILITA[anno])MATRICE_REPERIBILITA[anno]=[];MATRICE_REPERIBILITA[anno][settimana-1]=gruppo;}});}}else{MATRICE_REPERIBILITA=JSON.parse(JSON.stringify(MATRICE_REPERIBILITA_DEFAULT));}if(wb.Sheets["Consuntivazione"]){const jsonCons=XLSX.utils.sheet_to_json(wb.Sheets["Consuntivazione"],{header:1}).slice(1);if(jsonCons.length>0)consuntivazioneData=jsonCons.map(r=>({id:String(r[0]||Date.now()),cid:formattaCID(String(r[1]||'')),data:String(r[2]||''),odm:String(r[3]||''),op:String(r[4]||''),ore:parseInt(r[5])||0,min:parseInt(r[6])||0,oreNorm:parseInt(r[7])||0,minNorm:parseInt(r[8])||0,oreSpec:parseInt(r[9])||0,minSpec:parseInt(r[10])||0}));}
 saveDataToSheets('team_dipendenti_db', dipendenti);

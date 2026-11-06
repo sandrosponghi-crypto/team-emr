@@ -60,10 +60,9 @@ function ordinaDipendenti(lista) {
 }
 
 // ✅ FUNZIONE CRITICA: Normalizza tutti i dati caricati da Google Sheets
+// ✅ FUNZIONE CRITICA: Normalizza tutti i dati caricati da Google Sheets
 function normalizzaDatiCaricati() {
     console.log('🔧 Normalizzazione dati in corso...');
-    console.log('📋 schemaNominativiRaw tipo:', typeof schemaNominativiRaw, 'valore:', schemaNominativiRaw);
-    console.log('📋 MATRICE_REPERIBILITA tipo:', typeof MATRICE_REPERIBILITA, 'valore:', MATRICE_REPERIBILITA);
     
     // 1. Normalizza dipendenti
     dipendenti = dipendenti.map(d => ({
@@ -81,39 +80,64 @@ function normalizzaDatiCaricati() {
         decorrenzaInq: d.decorrenzaInq ? String(d.decorrenzaInq).trim() : ''
     }));
     
-    // 2. Normalizza attività calendario
-    attivitaCalendario = attivitaCalendario.map(a => ({
-        ...a,
-        id: String(a.id || ''),
-        cid: String(a.cid || '').trim().padStart(8, '0'),
-        data: String(a.data || ''),
-        tipo: String(a.tipo || ''),
-        odm: a.odm ? String(a.odm).trim() : '',
-        desc: a.desc ? String(a.desc).trim() : '',
-        op: a.op ? String(a.op).trim() : '',
-        ore: Number(a.ore || 0),
-        min: Number(a.min || 0),
-        oreNorm: Number(a.oreNorm || 0),
-        minNorm: Number(a.minNorm || 0),
-        oreSpec: Number(a.oreSpec || 0),
-        minSpec: Number(a.minSpec || 0)
-    }));
+    // 2. Normalizza attività calendario - CRITICO: converti Date in stringa
+    attivitaCalendario = attivitaCalendario.map(a => {
+        let dataStr = a.data;
+        // Se è un oggetto Date, convertilo in stringa YYYY-MM-DD
+        if (dataStr instanceof Date) {
+            dataStr = dataLocaleToString(dataStr);
+        } else if (typeof dataStr === 'string' && dataStr.includes('T')) {
+            // Se è formato ISO UTC, estrai solo la data
+            dataStr = dataStr.split('T')[0];
+        } else if (typeof dataStr === 'number') {
+            // Se è un numero Excel, convertilo
+            dataStr = formattaDataExcel(dataStr);
+        }
+        
+        return {
+            ...a,
+            id: String(a.id || ''),
+            cid: String(a.cid || '').trim().padStart(8, '0'),
+            data: dataStr,
+            tipo: String(a.tipo || ''),
+            odm: a.odm ? String(a.odm).trim() : '',
+            desc: a.desc ? String(a.desc).trim() : '',
+            op: a.op ? String(a.op).trim() : '',
+            ore: Number(a.ore || 0),
+            min: Number(a.min || 0),
+            oreNorm: Number(a.oreNorm || 0),
+            minNorm: Number(a.minNorm || 0),
+            oreSpec: Number(a.oreSpec || 0),
+            minSpec: Number(a.minSpec || 0)
+        };
+    });
     
-    // 3. Normalizza consuntivazione
-    consuntivazioneData = consuntivazioneData.map(c => ({
-        ...c,
-        id: String(c.id || ''),
-        cid: String(c.cid || '').trim().padStart(8, '0'),
-        data: String(c.data || ''),
-        odm: c.odm ? String(c.odm).trim() : '',
-        op: c.op ? String(c.op).trim() : '',
-        ore: Number(c.ore || 0),
-        min: Number(c.min || 0),
-        oreNorm: Number(c.oreNorm || 0),
-        minNorm: Number(c.minNorm || 0),
-        oreSpec: Number(c.oreSpec || 0),
-        minSpec: Number(c.minSpec || 0)
-    }));
+    // 3. Normalizza consuntivazione - CRITICO: converti Date in stringa
+    consuntivazioneData = consuntivazioneData.map(c => {
+        let dataStr = c.data;
+        if (dataStr instanceof Date) {
+            dataStr = dataLocaleToString(dataStr);
+        } else if (typeof dataStr === 'string' && dataStr.includes('T')) {
+            dataStr = dataStr.split('T')[0];
+        } else if (typeof dataStr === 'number') {
+            dataStr = formattaDataExcel(dataStr);
+        }
+        
+        return {
+            ...c,
+            id: String(c.id || ''),
+            cid: String(c.cid || '').trim().padStart(8, '0'),
+            data: dataStr,
+            odm: c.odm ? String(c.odm).trim() : '',
+            op: c.op ? String(c.op).trim() : '',
+            ore: Number(c.ore || 0),
+            min: Number(c.min || 0),
+            oreNorm: Number(c.oreNorm || 0),
+            minNorm: Number(c.minNorm || 0),
+            oreSpec: Number(c.oreSpec || 0),
+            minSpec: Number(c.minSpec || 0)
+        };
+    });
     
     // 4. Normalizza festività
     festivitaCustom = festivitaCustom.map(f => ({
@@ -126,45 +150,28 @@ function normalizzaDatiCaricati() {
         sede: f.sede ? String(f.sede).trim() : ''
     }));
     
-    // 5. ✅ FIX CRITICO: Parsa schema nominativi
-    if (typeof schemaNominativiRaw === 'string' && schemaNominativiRaw.trim() !== '') {
+    // 5. Parsa schema nominativi - CRITICO: se è una stringa JSON, parsala
+    if (typeof schemaNominativiRaw === 'string') {
         try {
             schemaNominativiRaw = JSON.parse(schemaNominativiRaw);
-            console.log('✅ schemaNominativiRaw parsato da stringa:', schemaNominativiRaw);
         } catch (e) {
             console.error('❌ Errore parsing schemaNominativiRaw:', e);
             schemaNominativiRaw = {};
         }
     }
     
-    // 6. ✅ FIX CRITICO: Parsa matrice reperibilità
-    if (typeof MATRICE_REPERIBILITA === 'string' && MATRICE_REPERIBILITA.trim() !== '') {
+    // 6. Parsa matrice reperibilità - CRITICO: se è una stringa JSON, parsala
+    if (typeof MATRICE_REPERIBILITA === 'string') {
         try {
             MATRICE_REPERIBILITA = JSON.parse(MATRICE_REPERIBILITA);
-            console.log('✅ MATRICE_REPERIBILITA parsata da stringa:', Object.keys(MATRICE_REPERIBILITA).length, 'anni');
         } catch (e) {
             console.error('❌ Errore parsing MATRICE_REPERIBILITA:', e);
             MATRICE_REPERIBILITA = JSON.parse(JSON.stringify(MATRICE_REPERIBILITA_DEFAULT));
         }
     }
     
-    // 7. Normalizza struttura schema nominativi
-    if (schemaNominativiRaw && typeof schemaNominativiRaw === 'object') {
-        // Se ha la struttura { MSP: { tecnici: [...], operativi: [...] } }
-        if (schemaNominativiRaw['EEMM2'] || Object.keys(schemaNominativiRaw).some(k => schemaNominativiRaw[k].tecnici)) {
-            schemaNominativi = schemaNominativiRaw;
-        }
-        // Se ha la struttura { tecnici: [...], operativi: [...] } (senza MSP)
-        else if (schemaNominativiRaw.tecnici || schemaNominativiRaw.operativi) {
-            schemaNominativi['EEMM2'] = {
-                tecnici: schemaNominativiRaw.tecnici || [],
-                operativi: schemaNominativiRaw.operativi || []
-            };
-        }
-    }
-    
-    // 8. Normalizza matrice reperibilità (converti chiavi in numeri)
-    if (MATRICE_REPERIBILITA && typeof MATRICE_REPERIBILITA === 'object' && !Array.isArray(MATRICE_REPERIBILITA)) {
+    // 7. Normalizza matrice reperibilità (converti chiavi in numeri)
+    if (MATRICE_REPERIBILITA && typeof MATRICE_REPERIBILITA === 'object') {
         const normalized = {};
         Object.keys(MATRICE_REPERIBILITA).forEach(anno => {
             const sequenza = MATRICE_REPERIBILITA[anno];
@@ -180,7 +187,7 @@ function normalizzaDatiCaricati() {
         attività: attivitaCalendario.length,
         consuntivazione: consuntivazioneData.length,
         festività: festivitaCustom.length,
-        schemaNominativi: Object.keys(schemaNominativi).length,
+        schemaNominativi: Object.keys(schemaNominativiRaw).length,
         matriceReperibilità: Object.keys(MATRICE_REPERIBILITA).length
     });
 }

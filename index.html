@@ -704,12 +704,17 @@ window.startApp = function() {
     console.log('📋 schemaNominativi dopo normalizzazione:', Object.keys(schemaNominativi));
     console.log('📋 MATRICE_REPERIBILITA anni:', Object.keys(MATRICE_REPERIBILITA).slice(0, 5));
     
+    // ✅ FIX: Usa i dati caricati da Google Sheets, non sovrascrivere con default
     if (Object.keys(schemaNominativi).length === 0) {
         console.log('⚠️ schemaNominativi vuoto, uso default');
         schemaNominativi['EEMM2'] = {
             tecnici: [{gruppo:1,cid:'00256375'},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:2,cid:'00427128'},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:3,cid:'00426853'},{gruppo:3,cid:'00256247'},{gruppo:3,cid:''},{gruppo:3,cid:''},{gruppo:4,cid:'00249071'},{gruppo:4,cid:''},{gruppo:4,cid:''},{gruppo:4,cid:''}],
             operativi: [{gruppo:1,cid:'00256375'},{gruppo:1,cid:'00452743'},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:2,cid:'00255747'},{gruppo:2,cid:'00435117'},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:3,cid:''},{gruppo:3,cid:'00454542'},{gruppo:3,cid:'00256676'},{gruppo:3,cid:''},{gruppo:3,cid:''},{gruppo:3,cid:''},{gruppo:4,cid:''},{gruppo:4,cid:'00250970'},{gruppo:4,cid:'00256244'},{gruppo:4,cid:''},{gruppo:4,cid:''},{gruppo:4,cid:''}]
         };
+        // ✅ Salva i default su Google Sheets per future sessioni
+        saveDataToSheets('team_schema_nominativi_db', schemaNominativi);
+    } else {
+        console.log('✅ schemaNominativi caricato da Google Sheets:', Object.keys(schemaNominativi));
     }
     
     if (typeof popolaAnniIniziali === 'function') popolaAnniIniziali();

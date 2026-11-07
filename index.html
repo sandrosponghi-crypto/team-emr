@@ -60,49 +60,87 @@ function ordinaDipendenti(lista) {
 
 // ✅ FUNZIONE CRITICA: Estrae i dati reali dalla struttura nidificata di Google Sheets
 function estraiDatiReali(dataStr) {
-    if (!dataStr) return null;
+    if (!dataStr) {
+        console.log('❌ estraiDatiReali: dataStr è null/undefined');
+        return null;
+    }
+    
+    console.log('🔍 estraiDatiReali - tipo:', typeof dataStr);
+    console.log('🔍 estraiDatiReali - chiavi:', Object.keys(dataStr));
     
     // Se è una stringa, prova a parsarla
     if (typeof dataStr === 'string' && dataStr.trim() !== '') {
         try {
             const parsed = JSON.parse(dataStr);
+            console.log('✅ Stringa parsata, chiavi:', Object.keys(parsed));
             return estraiDatiReali(parsed);
         } catch (e) {
+            console.error('❌ Errore parsing stringa:', e);
             return null;
         }
     }
     
-    // Se è un oggetto, cerca la struttura nidificata {"3":{"4":[...]}}
+    // Se è un oggetto, cerca la struttura nidificata
     if (typeof dataStr === 'object' && dataStr !== null && !Array.isArray(dataStr)) {
-        // Caso 1: struttura nidificata {"1":1,"3":{"4":["{...JSON...}"]}}
-        if (dataStr["3"] && dataStr["3"]["4"] && Array.isArray(dataStr["3"]["4"])) {
-            const innerJson = dataStr["3"]["4"][0];
-            if (typeof innerJson === 'string') {
-                try {
-                    const parsed = JSON.parse(innerJson);
-                    console.log('✅ Dati estratti da struttura nidificata ["3"]["4"][0] (stringa)');
-                    return parsed;
-                } catch (e) {
-                    return innerJson;
+        // Caso 1: struttura diretta {"EEMM2":{...}} o {"2016":[...]}
+        if (dataStr["EEMM2"] || dataStr["2016"] || dataStr["tecnici"] || dataStr["operativi"]) {
+            console.log('✅ Struttura diretta trovata');
+            return dataStr;
+        }
+        
+        // Caso 2: struttura nidificata {"1":1,"3":{"4":["{JSON}"]}}
+        // Prova diverse combinazioni di chiavi
+        const possiblePaths = [
+            ["3", "4"],
+            ["1", "2"],
+            ["data", "value"],
+            ["content", "data"]
+        ];
+        
+        for (const [key1, key2] of possiblePaths) {
+            if (dataStr[key1] && dataStr[key1][key2]) {
+                console.log(`🔍 Trovata chiave "${key1}" e "${key2}"`);
+                const arr = dataStr[key1][key2];
+                
+                if (Array.isArray(arr) && arr.length > 0) {
+                    const innerJson = arr[0];
+                    console.log('🔍 innerJson tipo:', typeof innerJson);
+                    
+                    if (typeof innerJson === 'string') {
+                        try {
+                            const parsed = JSON.parse(innerJson);
+                            console.log('✅ Dati estratti da ["' + key1 + '"]["' + key2 + '"][0] (stringa parsata)');
+                            console.log('✅ Chiavi del JSON parsato:', Object.keys(parsed));
+                            return parsed;
+                        } catch (e) {
+                            console.error('❌ Errore parsing innerJson:', e);
+                        }
+                    } else if (typeof innerJson === 'object' && innerJson !== null) {
+                        console.log('✅ Dati estratti da ["' + key1 + '"]["' + key2 + '"][0] (già oggetto)');
+                        return innerJson;
+                    }
                 }
             }
-            // ✅ FIX: se è già un oggetto parsato
-            if (typeof innerJson === 'object' && innerJson !== null) {
-                console.log('✅ Dati estratti da struttura nidificata ["3"]["4"][0] (oggetto)');
-                return innerJson;
-            }
-            return innerJson;
         }
-        // Caso 2: struttura diretta {"EEMM2":{...}} o {"2016":[...]}
-        if (dataStr["EEMM2"] || dataStr["2016"] || dataStr["tecnici"] || dataStr["operativi"]) {
-            return dataStr;
+        
+        // Caso 3: cerca ricorsivamente in tutte le chiavi
+        for (const key in dataStr) {
+            if (dataStr.hasOwnProperty(key)) {
+                const value = dataStr[key];
+                if (typeof value === 'object' && value !== null) {
+                    const result = estraiDatiReali(value);
+                    if (result && Object.keys(result).length > 0) {
+                        console.log('✅ Dati estratti ricorsivamente da chiave:', key);
+                        return result;
+                    }
+                }
+            }
         }
     }
     
+    console.log('⚠️ Nessuna struttura riconosciuta');
     return dataStr;
-}
-
-function normalizzaDatiCaricati() {
+}function normalizzaDatiCaricati() {
     console.log('🔧 Normalizzazione dati in corso...');
     console.log('📋 Tipo schemaNominativiRaw:', typeof schemaNominativiRaw);
     console.log('📋 Tipo MATRICE_REPERIBILITA:', typeof MATRICE_REPERIBILITA);
@@ -191,54 +229,57 @@ attivitaCalendario = attivitaCalendario.map(a => {
         sede: f.sede ? String(f.sede).trim() : ''
     }));
     
-    // 5. ✅ FIX CRITICO: Estrai i dati reali dalla struttura nidificata
-    const schemaEstratto = estraiDatiReali(schemaNominativiRaw);
-    console.log('📋 Schema estratto:', schemaEstratto ? Object.keys(schemaEstratto) : 'NULL');
-    
-    const matriceEstratta = estraiDatiReali(MATRICE_REPERIBILITA);
-    console.log('📋 Matrice estratta:', matriceEstratta ? Object.keys(matriceEstratta) : 'NULL');
-    
-    // 6. Normalizza schema nominativi
-    schemaNominativi = {};
-    if (schemaEstratto && typeof schemaEstratto === 'object') {
-        if (schemaEstratto["EEMM2"] || Object.keys(schemaEstratto).some(k => schemaEstratto[k] && schemaEstratto[k].tecnici)) {
-            schemaNominativi = schemaEstratto;
-        } else if (schemaEstratto.tecnici || schemaEstratto.operativi) {
-            schemaNominativi['EEMM2'] = {
-                tecnici: schemaEstratto.tecnici || [],
-                operativi: schemaEstratto.operativi || []
-            };
-        }
+// 5. ✅ FIX CRITICO: Estrai i dati reali dalla struttura nidificata
+const schemaEstratto = estraiDatiReali(schemaNominativiRaw);
+console.log('📋 Schema estratto:', schemaEstratto ? Object.keys(schemaEstratto) : 'NULL');
+
+const matriceEstratta = estraiDatiReali(MATRICE_REPERIBILITA);
+console.log('📋 Matrice estratta:', matriceEstratta ? Object.keys(matriceEstratta) : 'NULL');
+
+// 6. Normalizza schema nominativi
+schemaNominativi = {};
+if (schemaEstratto && typeof schemaEstratto === 'object' && Object.keys(schemaEstratto).length > 0) {
+    if (schemaEstratto["EEMM2"] || Object.keys(schemaEstratto).some(k => schemaEstratto[k] && schemaEstratto[k].tecnici)) {
+        schemaNominativi = schemaEstratto;
+    } else if (schemaEstratto.tecnici || schemaEstratto.operativi) {
+        schemaNominativi['EEMM2'] = {
+            tecnici: schemaEstratto.tecnici || [],
+            operativi: schemaEstratto.operativi || []
+        };
     }
-    
-    // 7. Normalizza matrice reperibilità
-    if (matriceEstratta && typeof matriceEstratta === 'object' && !Array.isArray(matriceEstratta)) {
-        const normalized = {};
-        Object.keys(matriceEstratta).forEach(anno => {
-            const sequenza = matriceEstratta[anno];
-            if (Array.isArray(sequenza)) {
-                normalized[anno] = sequenza.map(g => Number(g || 0));
-            }
-        });
-        if (Object.keys(normalized).length > 0) {
-            MATRICE_REPERIBILITA = normalized;
-        } else {
-            MATRICE_REPERIBILITA = JSON.parse(JSON.stringify(MATRICE_REPERIBILITA_DEFAULT));
+}
+
+// ✅ FIX: Se schemaNominativi è ancora vuoto, usa i default hardcoded
+if (Object.keys(schemaNominativi).length === 0) {
+    console.log('⚠️ schemaNominativi vuoto dopo estrazione, uso default hardcoded');
+    schemaNominativi['EEMM2'] = {
+        tecnici: [
+            {gruppo:1,cid:'00256375'},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:1,cid:''},
+            {gruppo:2,cid:'00427128'},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:2,cid:''},
+            {gruppo:3,cid:'00426853'},{gruppo:3,cid:'00256247'},{gruppo:3,cid:''},{gruppo:3,cid:''},
+            {gruppo:4,cid:'00249071'},{gruppo:4,cid:''},{gruppo:4,cid:''},{gruppo:4,cid:''}
+        ],
+        operativi: [
+            {gruppo:1,cid:'00256375'},{gruppo:1,cid:'00452743'},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:1,cid:''},
+            {gruppo:2,cid:'00255747'},{gruppo:2,cid:'00435117'},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:2,cid:''},
+            {gruppo:3,cid:''},{gruppo:3,cid:'00454542'},{gruppo:3,cid:'00256676'},{gruppo:3,cid:''},{gruppo:3,cid:''},{gruppo:3,cid:''},
+            {gruppo:4,cid:''},{gruppo:4,cid:'00250970'},{gruppo:4,cid:'00256244'},{gruppo:4,cid:''},{gruppo:4,cid:''},{gruppo:4,cid:''}
+        ]
+    };
+}
+
+// 7. Normalizza matrice reperibilità
+if (matriceEstratta && typeof matriceEstratta === 'object' && Object.keys(matriceEstratta).length > 0 && !Array.isArray(matriceEstratta)) {
+    const normalized = {};
+    Object.keys(matriceEstratta).forEach(anno => {
+        const sequenza = matriceEstratta[anno];
+        if (Array.isArray(sequenza)) {
+            normalized[anno] = sequenza.map(g => Number(g || 0));
         }
-    } else {
-        MATRICE_REPERIBILITA = JSON.parse(JSON.stringify(MATRICE_REPERIBILITA_DEFAULT));
-    }
-    
-    console.log('✅ Normalizzazione completata:', {
-        dipendenti: dipendenti.length,
-        attività: attivitaCalendario.length,
-        consuntivazione: consuntivazioneData.length,
-        festività: festivitaCustom.length,
-        schemaNominativi: Object.keys(schemaNominativi).length,
-        schemaNominativiKeys: Object.keys(schemaNominativi),
-        matriceReperibilità: Object.keys(MATRICE_REPERIBILITA).length,
-        matriceAnni: Object.keys(MATRICE_REPERIBILITA).slice(0, 5)
     });
+    if (Object.keys(normalized).length > 0) {
+        MATRICE_REPERIBILITA = normalized;
+    }
 }
 
 function caricaFileOdM(event) {

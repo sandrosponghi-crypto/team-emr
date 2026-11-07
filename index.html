@@ -12,6 +12,7 @@ const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzteI5iJ4k0PV
 const APP_PASSWORD = "teamemr2024";
 window._isInitializing = true;
 window.odmDatabase = {};
+
 let dbData = {
     team_dipendenti_db: [],
     team_festivita_db: [],
@@ -20,6 +21,7 @@ let dbData = {
     team_schema_nominativi_db: {},
     team_matrice_reperibilita_db: {}
 };
+
 window.isLoadingData = false;
 
 function dataLocaleToString(d) {
@@ -33,7 +35,7 @@ function dataLocaleToString(d) {
 function parseLocalDate(dateStr) {
     if (!dateStr) return null;
     const str = String(dateStr);
-    if (str.includes('T')) str = str.split('T')[0];
+    if (str.includes('T')) { const s2 = str.split('T')[0]; return parseLocalDate(s2); }
     const parts = str.split('-');
     if (parts.length === 3) {
         return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
@@ -58,11 +60,51 @@ function ordinaDipendenti(lista) {
     });
 }
 
+// ✅ FUNZIONE CRITICA: Estrae i dati reali dalla struttura nidificata di Google Sheets
+function estraiDatiReali(dataStr) {
+    if (!dataStr) return null;
+    
+    // Se è una stringa, prova a parsarla
+    if (typeof dataStr === 'string' && dataStr.trim() !== '') {
+        try {
+            const parsed = JSON.parse(dataStr);
+            return estraiDatiReali(parsed);
+        } catch (e) {
+            return null;
+        }
+    }
+    
+    // Se è un oggetto, cerca la struttura nidificata {"3":{"4":[...]}}
+    if (typeof dataStr === 'object' && dataStr !== null && !Array.isArray(dataStr)) {
+        // Caso 1: struttura nidificata {"1":1,"3":{"4":["{...JSON...}"]}}
+        if (dataStr["3"] && dataStr["3"]["4"] && Array.isArray(dataStr["3"]["4"])) {
+            const innerJson = dataStr["3"]["4"][0];
+            if (typeof innerJson === 'string') {
+                try {
+                    const parsed = JSON.parse(innerJson);
+                    console.log('✅ Dati estratti da struttura nidificata');
+                    return parsed;
+                } catch (e) {
+                    return innerJson;
+                }
+            }
+            return innerJson;
+        }
+        // Caso 2: struttura diretta {"EEMM2":{...}} o {"2016":[...]}
+        if (dataStr["EEMM2"] || dataStr["2016"] || dataStr["tecnici"] || dataStr["operativi"]) {
+            return dataStr;
+        }
+    }
+    
+    return dataStr;
+}
+
 function normalizzaDatiCaricati() {
     console.log('🔧 Normalizzazione dati in corso...');
     console.log('📋 Tipo schemaNominativiRaw:', typeof schemaNominativiRaw);
     console.log('📋 Tipo MATRICE_REPERIBILITA:', typeof MATRICE_REPERIBILITA);
-
+    
+    // 1. Normalizza dipendenti
     dipendenti = dipendenti.map(d => ({
         ...d,
         cid: String(d.cid || '').trim().padStart(8, '0'),
@@ -77,7 +119,8 @@ function normalizzaDatiCaricati() {
         ingressoMS: d.ingressoMS ? String(d.ingressoMS).trim() : '',
         decorrenzaInq: d.decorrenzaInq ? String(d.decorrenzaInq).trim() : ''
     }));
-
+    
+    // 2. Normalizza attività calendario
     attivitaCalendario = attivitaCalendario.map(a => {
         let dataStr = a.data;
         if (dataStr instanceof Date) {
@@ -104,7 +147,8 @@ function normalizzaDatiCaricati() {
             minSpec: Number(a.minSpec || 0)
         };
     });
-
+    
+    // 3. Normalizza consuntivazione
     consuntivazioneData = consuntivazioneData.map(c => {
         let dataStr = c.data;
         if (dataStr instanceof Date) {
@@ -129,7 +173,8 @@ function normalizzaDatiCaricati() {
             minSpec: Number(c.minSpec || 0)
         };
     });
-
+    
+    // 4. Normalizza festività
     festivitaCustom = festivitaCustom.map(f => ({
         ...f,
         id: String(f.id || ''),
@@ -139,56 +184,45 @@ function normalizzaDatiCaricati() {
         tipo: String(f.tipo || ''),
         sede: f.sede ? String(f.sede).trim() : ''
     }));
-
-    if (typeof schemaNominativiRaw === 'string' && schemaNominativiRaw.trim() !== '') {
-        try {
-            schemaNominativiRaw = JSON.parse(schemaNominativiRaw);
-            console.log('✅ schemaNominativiRaw parsato da stringa JSON');
-        } catch (e) {
-            console.error('❌ Errore parsing schemaNominativiRaw:', e);
-            schemaNominativiRaw = {};
-        }
-    }
-
-    if (typeof MATRICE_REPERIBILITA === 'string' && MATRICE_REPERIBILITA.trim() !== '') {
-        try {
-            MATRICE_REPERIBILITA = JSON.parse(MATRICE_REPERIBILITA);
-            console.log('✅ MATRICE_REPERIBILITA parsata da stringa JSON');
-        } catch (e) {
-            console.error('❌ Errore parsing MATRICE_REPERIBILITA:', e);
-            MATRICE_REPERIBILITA = JSON.parse(JSON.stringify(MATRICE_REPERIBILITA_DEFAULT));
-        }
-    }
-
+    
+    // 5. ✅ FIX CRITICO: Estrai i dati reali dalla struttura nidificata
+    const schemaEstratto = estraiDatiReali(schemaNominativiRaw);
+    console.log('📋 Schema estratto:', schemaEstratto ? Object.keys(schemaEstratto) : 'NULL');
+    
+    const matriceEstratta = estraiDatiReali(MATRICE_REPERIBILITA);
+    console.log('📋 Matrice estratta:', matriceEstratta ? Object.keys(matriceEstratta) : 'NULL');
+    
+    // 6. Normalizza schema nominativi
     schemaNominativi = {};
-    if (schemaNominativiRaw && typeof schemaNominativiRaw === 'object' && !Array.isArray(schemaNominativiRaw)) {
-        const hasMspStructure = Object.keys(schemaNominativiRaw).some(k => {
-            const v = schemaNominativiRaw[k];
-            return v && typeof v === 'object' && (v.tecnici || v.operativi);
-        });
-        if (hasMspStructure) {
-            schemaNominativi = schemaNominativiRaw;
-        } else if (schemaNominativiRaw.tecnici || schemaNominativiRaw.operativi) {
+    if (schemaEstratto && typeof schemaEstratto === 'object') {
+        if (schemaEstratto["EEMM2"] || Object.keys(schemaEstratto).some(k => schemaEstratto[k] && schemaEstratto[k].tecnici)) {
+            schemaNominativi = schemaEstratto;
+        } else if (schemaEstratto.tecnici || schemaEstratto.operativi) {
             schemaNominativi['EEMM2'] = {
-                tecnici: schemaNominativiRaw.tecnici || [],
-                operativi: schemaNominativiRaw.operativi || []
+                tecnici: schemaEstratto.tecnici || [],
+                operativi: schemaEstratto.operativi || []
             };
         }
     }
-
-    if (MATRICE_REPERIBILITA && typeof MATRICE_REPERIBILITA === 'object' && !Array.isArray(MATRICE_REPERIBILITA)) {
+    
+    // 7. Normalizza matrice reperibilità
+    if (matriceEstratta && typeof matriceEstratta === 'object' && !Array.isArray(matriceEstratta)) {
         const normalized = {};
-        Object.keys(MATRICE_REPERIBILITA).forEach(anno => {
-            const sequenza = MATRICE_REPERIBILITA[anno];
+        Object.keys(matriceEstratta).forEach(anno => {
+            const sequenza = matriceEstratta[anno];
             if (Array.isArray(sequenza)) {
                 normalized[anno] = sequenza.map(g => Number(g || 0));
             }
         });
-        MATRICE_REPERIBILITA = normalized;
+        if (Object.keys(normalized).length > 0) {
+            MATRICE_REPERIBILITA = normalized;
+        } else {
+            MATRICE_REPERIBILITA = JSON.parse(JSON.stringify(MATRICE_REPERIBILITA_DEFAULT));
+        }
     } else {
         MATRICE_REPERIBILITA = JSON.parse(JSON.stringify(MATRICE_REPERIBILITA_DEFAULT));
     }
-
+    
     console.log('✅ Normalizzazione completata:', {
         dipendenti: dipendenti.length,
         attività: attivitaCalendario.length,
@@ -228,10 +262,7 @@ function caricaFileOdM(event) {
                 if (odm && op) {
                     const key = `${odm}_${op}`;
                     window.odmDatabase[key] = {
-                        odm: odm,
-                        op: op,
-                        unita: unita,
-                        stSis: stSis,
+                        odm: odm, op: op, unita: unita, stSis: stSis,
                         valido: stSis.toUpperCase() !== 'APER'
                     };
                     count++;

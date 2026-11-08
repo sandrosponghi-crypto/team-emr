@@ -921,7 +921,7 @@ function selezionaRisorsaSchema(tipo,indice,cid){
 function esportaSchemaNominativiExcel(){const wb=XLSX.utils.book_new();Object.keys(schemaNominativi).sort().forEach(msp=>{const datiMSP=schemaNominativi[msp];if(!datiMSP)return;const datiTecnici=[["SQ.","CID","Cognome Nome","MSP","Sede","Residenza","Cell. Lavoro","Cell. Privato"]];datiMSP.tecnici.forEach(riga=>{const dip=(riga.cid&&riga.cid.trim()!=='')?dipendenti.find(d=>d.cid===riga.cid):null;datiTecnici.push([riga.gruppo,riga.cid||'',dip?`${dip.cognome} ${dip.nome}`:'',msp,dip?dip.sedeLavoro:'',dip?dip.residenza:'',dip?dip.cellLavoro:'',dip?dip.cellPrivato:'']);});XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiTecnici),`Tecnici_${msp}`);const datiOperativi=[["SQ.","CID","Cognome Nome","MSP","Sede","Residenza","Cell. Lavoro","Cell. Privato"]];datiMSP.operativi.forEach(riga=>{const dip=(riga.cid&&riga.cid.trim()!=='')?dipendenti.find(d=>d.cid===riga.cid):null;datiOperativi.push([riga.gruppo,riga.cid||'',dip?`${dip.cognome} ${dip.nome}`:'',msp,dip?dip.sedeLavoro:'',dip?dip.residenza:'',dip?dip.cellLavoro:'',dip?dip.cellPrivato:'']);});XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiOperativi),`Operativi_${msp}`);});XLSX.writeFile(wb,`Schema_Nominativi_TuttiMSP.xlsx`);}
 function importaSchemaNominativiExcel(e){const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=function(evt){try{const data=new Uint8Array(evt.target.result);const wb=XLSX.read(data,{type:'array'});const fogliTecnici=Object.keys(wb.Sheets).filter(k=>k.startsWith('Tecnici_'));const fogliOperativi=Object.keys(wb.Sheets).filter(k=>k.startsWith('Operativi_'));const tuttiMSP=new Set();fogliTecnici.forEach(k=>tuttiMSP.add(k.replace('Tecnici_','')));fogliOperativi.forEach(k=>tuttiMSP.add(k.replace('Operativi_','')));if(tuttiMSP.size===0){if(wb.Sheets["Tecnici"]){const jsonTecnici=XLSX.utils.sheet_to_json(wb.Sheets["Tecnici"],{header:1}).slice(1);const datiMSP=garantisciStrutturaMSP(mspCorrenteSchema);datiMSP.tecnici=jsonTecnici.map(r=>({gruppo:parseInt(r[0])||1,cid:(r[1]&&String(r[1]).trim()!=='')?formattaCID(String(r[1])):''}));}if(wb.Sheets["Operativi"]){const jsonOperativi=XLSX.utils.sheet_to_json(wb.Sheets["Operativi"],{header:1}).slice(1);const datiMSP=garantisciStrutturaMSP(mspCorrenteSchema);datiMSP.operativi=jsonOperativi.map(r=>({gruppo:parseInt(r[0])||1,cid:(r[1]&&String(r[1]).trim()!=='')?formattaCID(String(r[1])):''}));}}else{tuttiMSP.forEach(msp=>{const datiMSP=garantisciStrutturaMSP(msp);if(wb.Sheets[`Tecnici_${msp}`]){const jsonTecnici=XLSX.utils.sheet_to_json(wb.Sheets[`Tecnici_${msp}`],{header:1}).slice(1);datiMSP.tecnici=jsonTecnici.map(r=>({gruppo:parseInt(r[0])||1,cid:(r[1]&&String(r[1]).trim()!=='')?formattaCID(String(r[1])):''}));}if(wb.Sheets[`Operativi_${msp}`]){const jsonOperativi=XLSX.utils.sheet_to_json(wb.Sheets[`Operativi_${msp}`],{header:1}).slice(1);datiMSP.operativi=jsonOperativi.map(r=>({gruppo:parseInt(r[0])||1,cid:(r[1]&&String(r[1]).trim()!=='')?formattaCID(String(r[1])):''}));}});}saveDataToSheets('team_schema_nominativi_db', schemaNominativi);popolaFiltroMSPSchemaNominativi();aggiornaSchemaNominativi();alert("Schema nominativi importato con successo!");}catch(err){alert("Errore lettura Excel: "+err.message);}};reader.readAsArrayBuffer(file);e.target.value='';}
 
-// ✅ FIX: Stampa PDF con tabella nominativi completa ed evidenziazione giallo
+// ✅ FIX: Stampa PDF con evidenziazione giallo SOLO per i Tecnici
 function stampaSchemaReperibilita(){
     const anno=document.getElementById('annoSchemaReperibilita').value;
     document.querySelectorAll('.tab-contenuto').forEach(el=>el.classList.add('hidden'));
@@ -949,10 +949,11 @@ function stampaSchemaReperibilita(){
     titoloTabella.textContent=`SCHEMA NOMINATIVI REPERIBILITÀ - MSP: ${mspCorrenteSchema||'Nessuno'}`;
     pagina2.appendChild(titoloTabella);
     
-    if(mspCorrenteSchema&&schemaNominativi[mspCorrenteSchema]){
-        const datiMSP=schemaNominativi[mspCorrenteSchema];
+    // ✅ FIX: Usa garantisciStrutturaMSP per ottenere i dati corretti
+    if(mspCorrenteSchema){
+        const datiMSP=garantisciStrutturaMSP(mspCorrenteSchema);
         
-        // ✅ Tabella Tecnici con stili inline per la stampa
+        // ✅ Tabella Tecnici con evidenziazione giallo SOLO sul primo nominativo di ogni gruppo
         const tabTecnici=document.createElement('table');
         tabTecnici.style.cssText='width:100%;border-collapse:collapse;font-size:11px;background:white;margin-bottom:20px;';
         let htmlTecnici='<thead><tr><th colspan="6" style="background:#1e40af;color:white;font-weight:800;font-size:12px;text-align:center;padding:6px;letter-spacing:0.5px;">TECNICI MSP</th></tr>';
@@ -961,9 +962,10 @@ function stampaSchemaReperibilita(){
         for(let gruppo=1;gruppo<=4;gruppo++){
             const righeGruppo=datiMSP.tecnici.filter(n=>n.gruppo===gruppo);
             righeGruppo.slice(0,4).forEach((riga,idx)=>{
-                const dip=(riga.cid&&riga.cid.trim()!=='')?dipendenti.find(d=>d.cid===riga.cid):null;
+                const cidStr = String(riga.cid || '').trim().padStart(8, '0');
+                const dip = (cidStr !== '00000000' && cidStr !== '') ? dipendenti.find(d => d.cid === cidStr) : null;
                 const isFirst=idx===0;
-                // ✅ FIX: Evidenziazione giallo tenue per il primo nominativo di ogni gruppo
+                // ✅ Evidenziazione giallo tenue SOLO per il primo nominativo di ogni gruppo (Tecnici)
                 const rowStyle=isFirst?'background:#fef9c3;-webkit-print-color-adjust:exact;print-color-adjust:exact;':'';
                 const cellStyle=`padding:3px;border:1px solid #cbd5e1;${rowStyle}`;
                 const sqStyle=`background:#dbeafe;font-weight:800;text-align:center;font-size:12px;color:#1e40af;width:35px;padding:3px;border:1px solid #cbd5e1;-webkit-print-color-adjust:exact;print-color-adjust:exact;`;
@@ -980,7 +982,7 @@ function stampaSchemaReperibilita(){
         spacer.style.height='20px';
         pagina2.appendChild(spacer);
         
-        // ✅ Tabella Operativi con stili inline per la stampa
+        // ✅ Tabella Operativi SENZA evidenziazione giallo
         const tabOperativi=document.createElement('table');
         tabOperativi.style.cssText='width:100%;border-collapse:collapse;font-size:11px;background:white;';
         let htmlOperativi='<thead><tr><th colspan="6" style="background:#1e40af;color:white;font-weight:800;font-size:12px;text-align:center;padding:6px;letter-spacing:0.5px;">OPERATIVI MSP</th></tr>';
@@ -989,13 +991,12 @@ function stampaSchemaReperibilita(){
         for(let gruppo=1;gruppo<=4;gruppo++){
             const righeGruppo=datiMSP.operativi.filter(n=>n.gruppo===gruppo);
             righeGruppo.slice(0,6).forEach((riga,idx)=>{
-                const dip=(riga.cid&&riga.cid.trim()!=='')?dipendenti.find(d=>d.cid===riga.cid):null;
-                const isFirst=idx===0;
-                // ✅ FIX: Evidenziazione giallo tenue per il primo nominativo di ogni gruppo
-                const rowStyle=isFirst?'background:#fef9c3;-webkit-print-color-adjust:exact;print-color-adjust:exact;':'';
-                const cellStyle=`padding:3px;border:1px solid #cbd5e1;${rowStyle}`;
+                const cidStr = String(riga.cid || '').trim().padStart(8, '0');
+                const dip = (cidStr !== '00000000' && cidStr !== '') ? dipendenti.find(d => d.cid === cidStr) : null;
+                // ✅ NO evidenziazione giallo per gli Operativi
+                const cellStyle=`padding:3px;border:1px solid #cbd5e1;`;
                 const sqStyle=`background:#dbeafe;font-weight:800;text-align:center;font-size:12px;color:#1e40af;width:35px;padding:3px;border:1px solid #cbd5e1;-webkit-print-color-adjust:exact;print-color-adjust:exact;`;
-                htmlOperativi+=`<tr style="${rowStyle}">${isFirst?`<td style="${sqStyle}" rowspan="6">${gruppo}</td>`:''}<td style="${cellStyle}">${dip?`${dip.cognome} ${dip.nome}`:''}</td><td style="${cellStyle}">${dip?dip.sedeLavoro:''}</td><td style="${cellStyle}">${dip?dip.residenza:''}</td><td style="${cellStyle}">${dip?dip.cellLavoro:''}</td><td style="${cellStyle}">${dip?dip.cellPrivato:''}</td></tr>`;
+                htmlOperativi+=`<tr>${idx===0?`<td style="${sqStyle}" rowspan="6">${gruppo}</td>`:''}<td style="${cellStyle}">${dip?`${dip.cognome} ${dip.nome}`:''}</td><td style="${cellStyle}">${dip?dip.sedeLavoro:''}</td><td style="${cellStyle}">${dip?dip.residenza:''}</td><td style="${cellStyle}">${dip?dip.cellLavoro:''}</td><td style="${cellStyle}">${dip?dip.cellPrivato:''}</td></tr>`;
             });
             if(gruppo<4)htmlOperativi+='<tr style="height:5px;background:transparent;"><td colspan="6" style="padding:0;border:none;"></td></tr>';
         }

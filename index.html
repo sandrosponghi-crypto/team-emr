@@ -262,7 +262,6 @@ function caricaFileOdM(event) {
             let nuoviRecord = [];
             let count = 0;
             let skipped = 0;
-            let duplicati = 0;
 
             for (let i = 0; i < jsonData.length; i++) {
                 const row = jsonData[i];
@@ -275,62 +274,69 @@ function caricaFileOdM(event) {
                 const stSis = String(row[5] || '').trim();
                 
                 if (odm === 'OdM' || odm === '' || odm === '---' || isNaN(parseInt(odm))) {
-                    skipped++;
-                    continue;
+                    skipped++; continue;
                 }
-                
                 if (odm && op) {
                     const key = `${odm}_${op}`;
-                    
-                    // ✅ FIX CRITICO: Controlla se il record esiste già
+                    // ✅ Salta se già presente nel database locale
                     if (window.odmDatabase[key]) {
-                        duplicati++;
-                        console.log(`⚠️ Record duplicato saltato: ${key}`);
+                        console.log(`⚠️ Duplicato saltato: ${key}`);
                         continue;
                     }
-                    
                     nuoviRecord.push({
-                        odm: odm, testo_br: testo, op: op, fb: fb, unita: unita, st_sis: stSis
+                        odm: odm, testo_br: testo, op: op, fb: fb, 
+                        unita: unita, st_sis: stSis
                     });
                     count++;
                 }
             }
 
             if (nuoviRecord.length === 0) {
-                alert(`Nessun nuovo record trovato nel file.\n${duplicati} record già presenti nel database sono stati saltati.`);
+                alert(`Nessun nuovo record trovato nel file.\nTutti i record sono già presenti nel database.`);
                 return;
             }
 
-            // ✅ INVIA SOLO I NUOVI RECORD A GOOGLE SHEETS (salvataggio incrementale)
-            alert(`📤 Invio di ${count} nuovi record al database...\n(${duplicati} duplicati saltati)`);
+            // ✅ Invia SOLO i nuovi record al server (salvataggio incrementale)
+            alert(`📤 Invio di ${count} nuovi record al database...`);
             
-            saveOdmIncremental(nuoviRecord).then(() => {
-                // Aggiorna il database locale con i nuovi record
-                nuoviRecord.forEach(item => {
-                    const key = `${item.odm}_${item.op}`;
-                    window.odmDatabase[key] = {
-                        odm: item.odm,
-                        op: item.op,
-                        unita: item.unita,
-                        stSis: item.st_sis,
-                        valido: item.st_sis.toUpperCase() !== 'APER'
-                    };
-                });
-                
-                console.log(`✅ Database OdM aggiornato: ${Object.keys(window.odmDatabase).length} record totali.`);
-                alert(`✅ Operazione completata!\n${count} nuovi record aggiunti al database.\n${duplicati} duplicati saltati.\nTotale record in memoria: ${Object.keys(window.odmDatabase).length}`);
-                aggiornaContatoreOdM();
-                if (!document.getElementById('sezione-consuntivazione').classList.contains('hidden')) {
-                    aggiornaConsuntivazione();
+            fetch(GOOGLE_SCRIPT_URL, {
+                method: 'POST',
+                body: JSON.stringify({ 
+                    action: 'save', 
+                    key: 'team_odm_db', 
+                    data: nuoviRecord 
+                })
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.status === 'success') {
+                    // Aggiorna il database locale
+                    nuoviRecord.forEach(item => {
+                        const key = `${item.odm}_${item.op}`;
+                        window.odmDatabase[key] = {
+                            odm: item.odm, op: item.op, unita: item.unita, 
+                            stSis: item.st_sis,
+                            valido: item.st_sis.toUpperCase() !== 'APER'
+                        };
+                    });
+                    console.log(`✅ ${result.added} record OdM aggiunti al database.`);
+                    alert(`✅ Operazione completata!\n${result.added} nuovi record aggiunti.\nTotale in memoria: ${Object.keys(window.odmDatabase).length}`);
+                    aggiornaContatoreOdM();
+                    if (!document.getElementById('sezione-consuntivazione').classList.contains('hidden')) {
+                        aggiornaConsuntivazione();
+                    }
+                } else {
+                    alert('❌ Errore: ' + result.message);
                 }
-            }).catch(error => {
-                console.error('❌ Errore durante il salvataggio incrementale:', error);
-                alert('❌ Errore durante il salvataggio dei dati OdM.');
+            })
+            .catch(err => {
+                console.error('❌ Errore durante il salvataggio:', err);
+                alert('❌ Errore di rete durante il salvataggio.');
             });
 
         } catch (error) {
             console.error('❌ Errore lettura file OdM:', error);
-            alert('❌ Errore durante la lettura del file OdM. Verifica il formato.');
+            alert('❌ Errore durante la lettura del file OdM.');
         }
     };
     reader.readAsArrayBuffer(file);
@@ -408,7 +414,7 @@ async function loadDataFromSheets() {
             alert('Errore di caricamento dati: ' + data.error);
             return;
         }
-        console.log('✅ Dati ricevuti dal server. Chiavi:', Object.keys(data));
+        console.log('✅ Dati ricevuti. Chiavi:', Object.keys(data));
         dipendenti = data.team_dipendenti_db || [];
         festivitaCustom = data.team_festivita_db || [];
         attivitaCalendario = data.team_attivita_db || [];
@@ -416,38 +422,35 @@ async function loadDataFromSheets() {
         schemaNominativiRaw = data.team_schema_nominativi_db || {};
         MATRICE_REPERIBILITA = data.team_matrice_reperibilita_db || {};
         
-        // ✅ NUOVO: Carica il database OdM
+        // ✅ NUOVO: Carica il database OdM dal server
         window.odmDatabase = {};
         const odmData = data.team_odm_db || [];
         console.log(`📦 Caricati ${odmData.length} record OdM dal database.`);
         odmData.forEach(row => {
-            const odm = String(row['OdM'] || '').trim();
-            const op = String(row['OP'] || '').trim();
+            const odm = String(row['OdM'] || row['odm'] || '').trim();
+            const op = String(row['OP'] || row['op'] || '').trim();
+            const unita = String(row['Unita'] || row['unita'] || '').trim();
+            const stSis = String(row['St.Sis'] || row['stSis'] || '').trim();
             if (odm && op && !isNaN(parseInt(odm))) {
                 const key = `${odm}_${op}`;
                 window.odmDatabase[key] = {
-                    odm: odm,
-                    op: op,
-                    unita: String(row['Unita'] || '').trim(),
-                    stSis: String(row['St.Sis'] || '').trim(),
-                    valido: String(row['St.Sis'] || '').trim().toUpperCase() !== 'APER'
+                    odm: odm, op: op, unita: unita, stSis: stSis,
+                    valido: stSis.toUpperCase() !== 'APER'
                 };
             }
         });
         
         normalizzaDatiCaricati();
         window.dbData = data;
-        console.log('📊 Dipendenti caricati:', dipendenti.length);
-        console.log('📊 Festività caricate:', festivitaCustom.length);
-        console.log('📊 Attività caricate:', attivitaCalendario.length);
         console.log('📊 OdM caricati:', Object.keys(window.odmDatabase).length);
         if(window.startApp) window.startApp();
         setTimeout(() => {
             window._isInitializing = false;
-            console.log('✅ Inizializzazione completata. Salvataggi abilitati.');
-        }, 5000);
+            console.log('✅ Inizializzazione completata.');
+            aggiornaContatoreOdM();
+        }, 2000);
     } catch (error) {
-        console.error('❌ Errore di rete o parsing:', error);
+        console.error('❌ Errore di rete:', error);
         alert('Impossibile connettersi al database. Verifica la connessione.');
     } finally {
         window.isLoadingData = false;
@@ -456,7 +459,7 @@ async function loadDataFromSheets() {
 
 async function saveDataToSheets(key, data) {
     if (window._isInitializing) {
-        console.log(`⏭️ Salvataggio di ${key} bloccato (inizializzazione in corso)`);
+        console.log(`⏭️ Salvataggio di ${key} bloccato`);
         return;
     }
     try {
@@ -466,11 +469,13 @@ async function saveDataToSheets(key, data) {
         });
         const result = await response.json();
         if (result.status === 'success') {
-            console.log(`✅ ${key} salvato con successo!`);
+            console.log(`✅ ${key} salvato!`);
             if (typeof window.dbData !== 'undefined') window.dbData[key] = data;
+        } else {
+            console.error('❌ Errore salvataggio:', result.message);
         }
     } catch (error) {
-        console.error('❌ Errore di rete durante il salvataggio:', error);
+        console.error('❌ Errore di rete:', error);
     }
 }
 
@@ -1330,7 +1335,36 @@ function aggiornaDatalistAutocompletamento(){
     const dlDesc=document.getElementById('datalistDescrizione');
     if(dlDesc){dlDesc.innerHTML=descUnici.map(v=>`<option value="${v}">`).join('');}
 }
-function esportaDatabaseExcel(){const wb=XLSX.utils.book_new();const datiDip=[["CID","Cognome","Nome","Nominativo","Suffisso_Email","MSP","CdL","Classe","Distaccamento","Pat","TurnoRep","SedeLavoro","Residenza","CellLavoro","CellPrivato","Email","IngressoMS","Quiescenza","DecorrenzaInq","Inq"]];dipendenti.forEach(d=>datiDip.push([formattaCID(d.cid),d.cognome,d.nome,d.nominativo,d.suffisso_email,d.msp,d.cdL,d.classe,d.distaccamento,d.pat,d.turnoRep,d.sedeLavoro,d.residenza,d.cellLavoro,d.cellPrivato,d.email,d.ingressoMS,d.quiescenza,d.decorrenzaInq,d.inq]));XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiDip),"Dipendenti");const datiFest=[["ID","Nome","Giorno","Mese","Tipo","Sede"]];festivitaCustom.forEach(f=>datiFest.push([f.id,f.nome,f.giorno,f.mese,f.tipo,f.sede||'']));XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiFest),"Festivita");const datiAtt=[["ID","CID","Data","Tipo","OdM","Descrizione","Ore","Minuti","OP","OreNorm","MinNorm","OreSpec","MinSpec"]];attivitaCalendario.forEach(a=>datiAtt.push([a.id,formattaCID(a.cid),a.data,a.tipo,a.odm,a.desc,a.ore,a.min,a.op,a.oreNorm||0,a.minNorm||0,a.oreSpec||0,a.minSpec||0]));XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiAtt),"Attivita");const datiTurni=[["Anno","Settimana_ISO","Gruppo_Reperibilita"]];const anniOrdinati=Object.keys(MATRICE_REPERIBILITA).sort((a,b)=>a-b);anniOrdinati.forEach(anno=>{const sequenza=MATRICE_REPERIBILITA[anno];sequenza.forEach((gruppo,indexSettimana)=>{datiTurni.push([parseInt(anno),indexSettimana+1,gruppo]);});});XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiTurni),"Turni_Reperibilita");const datiCons=[["ID","CID","Data","ODM","OP","Ore","Min","OreNorm","MinNorm","OreSpec","MinSpec"]];consuntivazioneData.forEach(c=>datiCons.push([c.id,formattaCID(c.cid),c.data,c.odm,c.op,c.ore,c.min,c.oreNorm||0,c.minNorm||0,c.oreSpec||0,c.minSpec||0]));XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiCons),"Consuntivazione");const datiOdm = [["OdM", "Testo_br", "OP", "FB", "Unita", "St.Sis"]];Object.values(window.odmDatabase).forEach(rec => {datiOdm.push([rec.odm, '', rec.op, '', rec.unita, rec.stSis]);});XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(datiOdm), "ODM");XLSX.writeFile(wb,"Database_Completo_EM.xlsx");}
+
+function esportaDatabaseExcel(){
+    const wb=XLSX.utils.book_new();
+    const datiDip=[["CID","Cognome","Nome","Nominativo","Suffisso_Email","MSP","CdL","Classe","Distaccamento","Pat","TurnoRep","SedeLavoro","Residenza","CellLavoro","CellPrivato","Email","IngressoMS","Quiescenza","DecorrenzaInq","Inq"]];
+    dipendenti.forEach(d=>datiDip.push([formattaCID(d.cid),d.cognome,d.nome,d.nominativo,d.suffisso_email,d.msp,d.cdL,d.classe,d.distaccamento,d.pat,d.turnoRep,d.sedeLavoro,d.residenza,d.cellLavoro,d.cellPrivato,d.email,d.ingressoMS,d.quiescenza,d.decorrenzaInq,d.inq]));
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiDip),"Dipendenti");
+    const datiFest=[["ID","Nome","Giorno","Mese","Tipo","Sede"]];
+    festivitaCustom.forEach(f=>datiFest.push([f.id,f.nome,f.giorno,f.mese,f.tipo,f.sede||'']));
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiFest),"Festivita");
+    const datiAtt=[["ID","CID","Data","Tipo","OdM","Descrizione","Ore","Minuti","OP","OreNorm","MinNorm","OreSpec","MinSpec"]];
+    attivitaCalendario.forEach(a=>datiAtt.push([a.id,formattaCID(a.cid),a.data,a.tipo,a.odm,a.desc,a.ore,a.min,a.op,a.oreNorm||0,a.minNorm||0,a.oreSpec||0,a.minSpec||0]));
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiAtt),"Attivita");
+    const datiTurni=[["Anno","Settimana_ISO","Gruppo_Reperibilita"]];
+    const anniOrdinati=Object.keys(MATRICE_REPERIBILITA).sort((a,b)=>a-b);
+    anniOrdinati.forEach(anno=>{const sequenza=MATRICE_REPERIBILITA[anno];sequenza.forEach((gruppo,indexSettimana)=>{datiTurni.push([parseInt(anno),indexSettimana+1,gruppo]);});});
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiTurni),"Turni_Reperibilita");
+    const datiCons=[["ID","CID","Data","ODM","OP","Ore","Min","OreNorm","MinNorm","OreSpec","MinSpec"]];
+    consuntivazioneData.forEach(c=>datiCons.push([c.id,formattaCID(c.cid),c.data,c.odm,c.op,c.ore,c.min,c.oreNorm||0,c.minNorm||0,c.oreSpec||0,c.minSpec||0]));
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiCons),"Consuntivazione");
+    
+    // ✅ NUOVO: Esporta anche il database OdM
+    const datiOdm = [["OdM", "Testo_br", "OP", "FB", "Unita", "St.Sis"]];
+    Object.values(window.odmDatabase).forEach(rec => {
+        datiOdm.push([rec.odm, '', rec.op, '', rec.unita, rec.stSis]);
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(datiOdm), "ODM");
+    
+    XLSX.writeFile(wb,"Database_Completo_EM.xlsx");
+}    
+    
 function importaDatabaseExcel(e){const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=function(evt){try{const data=new Uint8Array(evt.target.result);const wb=XLSX.read(data,{type:'array'});if(wb.Sheets["Dipendenti"]){const jsonDip=XLSX.utils.sheet_to_json(wb.Sheets["Dipendenti"],{header:1}).slice(1);if(jsonDip.length>0){dipendenti=jsonDip.map(r=>({cid:formattaCID(String(r[0]||'')),cognome:String(r[1]||''),nome:String(r[2]||''),nominativo:String(r[3]||''),suffisso_email:String(r[4]||''),msp:String(r[5]||''),cdL:String(r[6]||''),classe:String(r[7]||''),distaccamento:String(r[8]||''),pat:String(r[9]||''),turnoRep:String(r[10]||''),sedeLavoro:String(r[11]||''),residenza:String(r[12]||''),cellLavoro:String(r[13]||''),cellPrivato:String(r[14]||''),email:String(r[15]||''),ingressoMS:formattaDataExcel(r[16]),quiescenza:formattaDataExcel(r[17]),decorrenzaInq:formattaDataExcel(r[18]),inq:String(r[19]||'')}));}}if(wb.Sheets["Festivita"]){const jsonFest=XLSX.utils.sheet_to_json(wb.Sheets["Festivita"],{header:1}).slice(1);if(jsonFest.length>0)festivitaCustom=jsonFest.map(r=>({id:String(r[0]||Date.now()),nome:String(r[1]||''),giorno:parseInt(r[2])||1,mese:parseInt(r[3])||0,tipo:String(r[4]||'PATRONO'),sede:String(r[5]||'')}));}if(wb.Sheets["Attivita"]){const jsonAtt=XLSX.utils.sheet_to_json(wb.Sheets["Attivita"],{header:1}).slice(1);if(jsonAtt.length>0)attivitaCalendario=jsonAtt.map(r=>({id:String(r[0]||Date.now()),cid:formattaCID(String(r[1]||'')),data:String(r[2]||''),tipo:String(r[3]||''),odm:String(r[4]||''),desc:String(r[5]||''),ore:parseInt(r[6])||0,min:parseInt(r[7])||0,op:String(r[8]||''),oreNorm:parseInt(r[9])||0,minNorm:parseInt(r[10])||0,oreSpec:parseInt(r[11])||0,minSpec:parseInt(r[12])||0}));}if(wb.Sheets["Turni_Reperibilita"]){const jsonTurni=XLSX.utils.sheet_to_json(wb.Sheets["Turni_Reperibilita"],{header:1}).slice(1);if(jsonTurni.length>0){MATRICE_REPERIBILITA={};jsonTurni.forEach(r=>{const anno=parseInt(r[0]);const settimana=parseInt(r[1]);const gruppo=parseInt(r[2]);if(anno&&settimana&&gruppo){if(!MATRICE_REPERIBILITA[anno])MATRICE_REPERIBILITA[anno]=[];MATRICE_REPERIBILITA[anno][settimana-1]=gruppo;}});}}else{MATRICE_REPERIBILITA=JSON.parse(JSON.stringify(MATRICE_REPERIBILITA_DEFAULT));}if(wb.Sheets["Consuntivazione"]){const jsonCons=XLSX.utils.sheet_to_json(wb.Sheets["Consuntivazione"],{header:1}).slice(1);if(jsonCons.length>0)consuntivazioneData=jsonCons.map(r=>({id:String(r[0]||Date.now()),cid:formattaCID(String(r[1]||'')),data:String(r[2]||''),odm:String(r[3]||''),op:String(r[4]||''),ore:parseInt(r[5])||0,min:parseInt(r[6])||0,oreNorm:parseInt(r[7])||0,minNorm:parseInt(r[8])||0,oreSpec:parseInt(r[9])||0,minSpec:parseInt(r[10])||0}));}if(wb.Sheets["ODM"]){const jsonOdm=XLSX.utils.sheet_to_json(wb.Sheets["ODM"],{header:1}).slice(1);let count=0;jsonOdm.forEach(r=>{const odm=String(r[0]||'').trim();const op=String(r[2]||'').trim();const unita=String(r[4]||'').trim();const stSis=String(r[5]||'').trim();if(odm&&op&&!isNaN(parseInt(odm))){const key=`${odm}_${op}`;if(!window.odmDatabase[key]){window.odmDatabase[key]={odm:odm,op:op,unita:unita,stSis:stSis,valido:stSis.toUpperCase()!=='APER'};count++;}}});console.log(`✅ Importati ${count} nuovi record OdM dal file Excel.`);}
 saveDataToSheets('team_dipendenti_db', dipendenti);
 saveDataToSheets('team_festivita_db', festivitaCustom);

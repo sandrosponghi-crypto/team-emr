@@ -12,16 +12,15 @@ const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzteI5iJ4k0PV
 const APP_PASSWORD = "teamemr2024";
 window._isInitializing = true;
 window.odmDatabase = {};
-
 let dbData = {
     team_dipendenti_db: [],
     team_festivita_db: [],
     team_attivita_db: [],
     team_consuntivazione_db: [],
     team_schema_nominativi_db: {},
-    team_matrice_reperibilita_db: {}
+    team_matrice_reperibilita_db: {},
+    team_odm_db: []
 };
-
 window.isLoadingData = false;
 
 function dataLocaleToString(d) {
@@ -202,10 +201,20 @@ function normalizzaDatiCaricati() {
     }
     
     if (Object.keys(schemaNominativi).length === 0) {
-        console.log('⚠️ schemaNominativi vuoto, uso default');
+        console.log('⚠️ schemaNominativi vuoto dopo estrazione, uso default hardcoded');
         schemaNominativi['EEMM2'] = {
-            tecnici: [{gruppo:1,cid:'00256375'},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:2,cid:'00427128'},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:3,cid:'00426853'},{gruppo:3,cid:'00256247'},{gruppo:3,cid:''},{gruppo:3,cid:''},{gruppo:4,cid:'00249071'},{gruppo:4,cid:''},{gruppo:4,cid:''},{gruppo:4,cid:''}],
-            operativi: [{gruppo:1,cid:'00256375'},{gruppo:1,cid:'00452743'},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:2,cid:'00255747'},{gruppo:2,cid:'00435117'},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:3,cid:''},{gruppo:3,cid:'00454542'},{gruppo:3,cid:'00256676'},{gruppo:3,cid:''},{gruppo:3,cid:''},{gruppo:3,cid:''},{gruppo:4,cid:''},{gruppo:4,cid:'00250970'},{gruppo:4,cid:'00256244'},{gruppo:4,cid:''},{gruppo:4,cid:''},{gruppo:4,cid:''}]
+            tecnici: [
+                {gruppo:1,cid:'00256375'},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:1,cid:''},
+                {gruppo:2,cid:'00427128'},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:2,cid:''},
+                {gruppo:3,cid:'00426853'},{gruppo:3,cid:'00256247'},{gruppo:3,cid:''},{gruppo:3,cid:''},
+                {gruppo:4,cid:'00249071'},{gruppo:4,cid:''},{gruppo:4,cid:''},{gruppo:4,cid:''}
+            ],
+            operativi: [
+                {gruppo:1,cid:'00256375'},{gruppo:1,cid:'00452743'},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:1,cid:''},{gruppo:1,cid:''},
+                {gruppo:2,cid:'00255747'},{gruppo:2,cid:'00435117'},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:2,cid:''},{gruppo:2,cid:''},
+                {gruppo:3,cid:''},{gruppo:3,cid:'00454542'},{gruppo:3,cid:'00256676'},{gruppo:3,cid:''},{gruppo:3,cid:''},{gruppo:3,cid:''},
+                {gruppo:4,cid:''},{gruppo:4,cid:'00250970'},{gruppo:4,cid:'00256244'},{gruppo:4,cid:''},{gruppo:4,cid:''},{gruppo:4,cid:''}
+            ]
         };
     }
     
@@ -234,7 +243,8 @@ function normalizzaDatiCaricati() {
         schemaNominativi: Object.keys(schemaNominativi).length,
         schemaNominativiKeys: Object.keys(schemaNominativi),
         matriceReperibilità: Object.keys(MATRICE_REPERIBILITA).length,
-        matriceAnni: Object.keys(MATRICE_REPERIBILITA).slice(0, 5)
+        matriceAnni: Object.keys(MATRICE_REPERIBILITA).slice(0, 5),
+        odmDatabase: Object.keys(window.odmDatabase).length
     });
 }
 
@@ -248,35 +258,76 @@ function caricaFileOdM(event) {
             const workbook = XLSX.read(data, { type: 'array' });
             const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
             const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
-            window.odmDatabase = {};
+            
+            let nuoviRecord = [];
             let count = 0;
             let skipped = 0;
+            let duplicati = 0;
+
             for (let i = 0; i < jsonData.length; i++) {
                 const row = jsonData[i];
                 if (!row || row.length < 6) { skipped++; continue; }
                 const odm = String(row[0] || '').trim();
+                const testo = String(row[1] || '').trim();
                 const op = String(row[2] || '').trim();
+                const fb = String(row[3] || '').trim();
                 const unita = String(row[4] || '').trim();
                 const stSis = String(row[5] || '').trim();
+                
                 if (odm === 'OdM' || odm === '' || odm === '---' || isNaN(parseInt(odm))) {
                     skipped++;
                     continue;
                 }
+                
                 if (odm && op) {
                     const key = `${odm}_${op}`;
-                    window.odmDatabase[key] = {
-                        odm: odm, op: op, unita: unita, stSis: stSis,
-                        valido: stSis.toUpperCase() !== 'APER'
-                    };
+                    
+                    // ✅ FIX CRITICO: Controlla se il record esiste già
+                    if (window.odmDatabase[key]) {
+                        duplicati++;
+                        console.log(`⚠️ Record duplicato saltato: ${key}`);
+                        continue;
+                    }
+                    
+                    nuoviRecord.push({
+                        odm: odm, testo_br: testo, op: op, fb: fb, unita: unita, st_sis: stSis
+                    });
                     count++;
                 }
             }
-            console.log(`✅ Database OdM caricato: ${count} record validi, ${skipped} righe saltate`);
-            alert(`✅ Database OdM caricato con successo!\n${count} ordini di manutenzione importati.\n(${skipped} righe non valide saltate)`);
-            aggiornaContatoreOdM();
-            if (!document.getElementById('sezione-consuntivazione').classList.contains('hidden')) {
-                aggiornaConsuntivazione();
+
+            if (nuoviRecord.length === 0) {
+                alert(`Nessun nuovo record trovato nel file.\n${duplicati} record già presenti nel database sono stati saltati.`);
+                return;
             }
+
+            // ✅ INVIA SOLO I NUOVI RECORD A GOOGLE SHEETS (salvataggio incrementale)
+            alert(`📤 Invio di ${count} nuovi record al database...\n(${duplicati} duplicati saltati)`);
+            
+            saveOdmIncremental(nuoviRecord).then(() => {
+                // Aggiorna il database locale con i nuovi record
+                nuoviRecord.forEach(item => {
+                    const key = `${item.odm}_${item.op}`;
+                    window.odmDatabase[key] = {
+                        odm: item.odm,
+                        op: item.op,
+                        unita: item.unita,
+                        stSis: item.st_sis,
+                        valido: item.st_sis.toUpperCase() !== 'APER'
+                    };
+                });
+                
+                console.log(`✅ Database OdM aggiornato: ${Object.keys(window.odmDatabase).length} record totali.`);
+                alert(`✅ Operazione completata!\n${count} nuovi record aggiunti al database.\n${duplicati} duplicati saltati.\nTotale record in memoria: ${Object.keys(window.odmDatabase).length}`);
+                aggiornaContatoreOdM();
+                if (!document.getElementById('sezione-consuntivazione').classList.contains('hidden')) {
+                    aggiornaConsuntivazione();
+                }
+            }).catch(error => {
+                console.error('❌ Errore durante il salvataggio incrementale:', error);
+                alert('❌ Errore durante il salvataggio dei dati OdM.');
+            });
+
         } catch (error) {
             console.error('❌ Errore lettura file OdM:', error);
             alert('❌ Errore durante la lettura del file OdM. Verifica il formato.');
@@ -284,6 +335,28 @@ function caricaFileOdM(event) {
     };
     reader.readAsArrayBuffer(file);
     event.target.value = '';
+}
+
+// ✅ NUOVA FUNZIONE: Salvataggio incrementale OdM
+async function saveOdmIncremental(newRecords) {
+    if (window._isInitializing) {
+        console.log(`⏭️ Salvataggio OdM bloccato (inizializzazione in corso)`);
+        return;
+    }
+    try {
+        const response = await fetch(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify({ action: 'save', key: 'team_odm_db', data: newRecords })
+        });
+        const result = await response.json();
+        if (result.status === 'success') {
+            console.log(`✅ ${result.added} record OdM aggiunti con successo!`);
+        } else {
+            console.error('❌ Errore dal server:', result.message);
+        }
+    } catch (error) {
+        console.error('❌ Errore di rete durante il salvataggio OdM:', error);
+    }
 }
 
 function validaOdM(odm, op, cdlDipendente) {
@@ -342,11 +415,32 @@ async function loadDataFromSheets() {
         consuntivazioneData = data.team_consuntivazione_db || [];
         schemaNominativiRaw = data.team_schema_nominativi_db || {};
         MATRICE_REPERIBILITA = data.team_matrice_reperibilita_db || {};
+        
+        // ✅ NUOVO: Carica il database OdM
+        window.odmDatabase = {};
+        const odmData = data.team_odm_db || [];
+        console.log(`📦 Caricati ${odmData.length} record OdM dal database.`);
+        odmData.forEach(row => {
+            const odm = String(row['OdM'] || '').trim();
+            const op = String(row['OP'] || '').trim();
+            if (odm && op && !isNaN(parseInt(odm))) {
+                const key = `${odm}_${op}`;
+                window.odmDatabase[key] = {
+                    odm: odm,
+                    op: op,
+                    unita: String(row['Unita'] || '').trim(),
+                    stSis: String(row['St.Sis'] || '').trim(),
+                    valido: String(row['St.Sis'] || '').trim().toUpperCase() !== 'APER'
+                };
+            }
+        });
+        
         normalizzaDatiCaricati();
         window.dbData = data;
         console.log('📊 Dipendenti caricati:', dipendenti.length);
         console.log('📊 Festività caricate:', festivitaCustom.length);
         console.log('📊 Attività caricate:', attivitaCalendario.length);
+        console.log('📊 OdM caricati:', Object.keys(window.odmDatabase).length);
         if(window.startApp) window.startApp();
         setTimeout(() => {
             window._isInitializing = false;
@@ -408,7 +502,14 @@ function esportaSchemaEMatriceExcel() {
     });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(datiMatrice), 'MATRICE_REPERIBILITA');
     
-    XLSX.writeFile(wb, 'Schema_e_Matrice_Reperibilita.xlsx');
+    // ✅ NUOVO: Esporta anche il database OdM
+    const datiOdm = [['OdM', 'Testo_br', 'OP', 'FB', 'Unita', 'St.Sis']];
+    Object.values(window.odmDatabase).forEach(rec => {
+        datiOdm.push([rec.odm, '', rec.op, '', rec.unita, rec.stSis]);
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(datiOdm), 'ODM');
+    
+    XLSX.writeFile(wb, 'Schema_Matrice_e_OdM.xlsx');
 }
 
 function importaSchemaEMatriceExcel(e) {
@@ -467,11 +568,43 @@ function importaSchemaEMatriceExcel(e) {
                 saveDataToSheets('team_matrice_reperibilita_db', MATRICE_REPERIBILITA);
             }
             
+            // ✅ NUOVO: Importa anche il database OdM
+            if (wb.Sheets['ODM']) {
+                const jsonOdm = XLSX.utils.sheet_to_json(wb.Sheets['ODM'], { header: 1 });
+                let count = 0;
+                for (let i = 1; i < jsonOdm.length; i++) {
+                    const row = jsonOdm[i];
+                    if (row.length >= 6) {
+                        const odm = String(row[0] || '').trim();
+                        const op = String(row[2] || '').trim();
+                        const unita = String(row[4] || '').trim();
+                        const stSis = String(row[5] || '').trim();
+                        
+                        if (odm && op && !isNaN(parseInt(odm))) {
+                            const key = `${odm}_${op}`;
+                            if (!window.odmDatabase[key]) {
+                                window.odmDatabase[key] = {
+                                    odm: odm,
+                                    op: op,
+                                    unita: unita,
+                                    stSis: stSis,
+                                    valido: stSis.toUpperCase() !== 'APER'
+                                };
+                                count++;
+                            }
+                        }
+                    }
+                }
+                console.log(`✅ Importati ${count} nuovi record OdM dal file Excel.`);
+                alert(`✅ Importati ${count} nuovi record OdM dal file Excel.`);
+            }
+            
             popolaFiltroMSPSchemaNominativi();
             aggiornaSchemaNominativi();
             popolaSelettoreAnniSchema();
             generaTabellaReperibilita(2026);
-            alert('✅ Schema e matrice importati con successo!');
+            aggiornaContatoreOdM();
+            alert('✅ Schema, matrice e OdM importati con successo!');
         } catch (err) {
             alert('❌ Errore lettura Excel: ' + err.message);
         }
@@ -645,8 +778,8 @@ function importaSchemaEMatriceExcel(e) {
 <div id="pulsantiExcelCalendario" class="flex flex-wrap gap-2">
 <button type="button" onclick="esportaDatabaseExcel()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition flex items-center gap-1"><i class="fa-solid fa-file-export"></i> Salva Excel</button>
 <label class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition cursor-pointer flex items-center gap-1"><i class="fa-solid fa-file-import"></i> Carica Excel<input type="file" id="inputImportDatabaseCal" accept=".xlsx" class="hidden" onchange="importaDatabaseExcel(event)"></label>
-<button type="button" onclick="esportaSchemaEMatriceExcel()" class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition flex items-center gap-1"><i class="fa-solid fa-file-export"></i> Salva Schema+Matrice</button>
-<label class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition cursor-pointer flex items-center gap-1"><i class="fa-solid fa-file-import"></i> Carica Schema+Matrice<input type="file" id="inputImportSchemaMatrice" accept=".xlsx" class="hidden" onchange="importaSchemaEMatriceExcel(event)"></label>
+<button type="button" onclick="esportaSchemaEMatriceExcel()" class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition flex items-center gap-1"><i class="fa-solid fa-file-export"></i> Salva Schema+Matrice+OdM</button>
+<label class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-3 py-1.5 rounded text-xs shadow transition cursor-pointer flex items-center gap-1"><i class="fa-solid fa-file-import"></i> Carica Schema+Matrice+OdM<input type="file" id="inputImportSchemaMatrice" accept=".xlsx" class="hidden" onchange="importaSchemaEMatriceExcel(event)"></label>
 </div>
 </div>
 <div class="flex items-center gap-2"><span class="text-xs font-bold text-slate-600">Vista:</span><div class="inline-flex rounded-md shadow-sm"><button type="button" id="btnVistaSettimana" onclick="setModalitaVista('settimana')" class="px-3 py-1.5 text-xs font-bold rounded-l-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">Settimanale</button><button type="button" id="btnVistaMese" onclick="setModalitaVista('mese')" class="px-3 py-1.5 text-xs font-bold border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">Mensile</button><button type="button" id="btnVistaAnnuale" onclick="setModalitaVista('annuale')" class="px-3 py-1.5 text-xs font-bold rounded-r-lg border border-slate-300 bg-blue-600 text-white">Annuale</button></div></div>
@@ -806,6 +939,7 @@ window.startApp = function() {
     console.log('🚀 Avvio app con dati da Google Sheets...');
     console.log('📋 schemaNominativi dopo normalizzazione:', Object.keys(schemaNominativi));
     console.log('📋 MATRICE_REPERIBILITA anni:', Object.keys(MATRICE_REPERIBILITA).slice(0, 5));
+    console.log('📋 OdM database:', Object.keys(window.odmDatabase).length, 'record');
     
     if (typeof popolaAnniIniziali === 'function') popolaAnniIniziali();
     if (typeof popolaSelettoreAnniSchema === 'function') popolaSelettoreAnniSchema();
@@ -886,7 +1020,6 @@ function renderTabellaTecnici(){
         while(righeGruppo.length<4){righeGruppo.push({gruppo:gruppo,cid:''});datiMSP.tecnici.push(righeGruppo[righeGruppo.length-1]);}
         righeGruppo.slice(0,4).forEach((riga,idx)=>{
             const tr=document.createElement('tr');
-            // ✅ FIX: converti cid in stringa prima di usare .trim()
             const cidStr = String(riga.cid || '').trim().padStart(8, '0');
             const dip = (cidStr !== '00000000' && cidStr !== '') ? dipendenti.find(d => d.cid === cidStr) : null;
             if(idx===0){tr.classList.add('primo-nominativo-giallo');}
@@ -910,7 +1043,6 @@ function renderTabellaOperativi(){
         while(righeGruppo.length<6){righeGruppo.push({gruppo:gruppo,cid:''});datiMSP.operativi.push(righeGruppo[righeGruppo.length-1]);}
         righeGruppo.slice(0,6).forEach((riga,idx)=>{
             const tr=document.createElement('tr');
-            // ✅ FIX: converti cid in stringa prima di usare .trim()
             const cidStr = String(riga.cid || '').trim().padStart(8, '0');
             const dip = (cidStr !== '00000000' && cidStr !== '') ? dipendenti.find(d => d.cid === cidStr) : null;
             if(turnoEvidenziatoPersREP&&dip&&String(dip.turnoRep)===String(turnoEvidenziatoPersREP)){tr.classList.add('riga-evidenziata-turno');}
@@ -922,11 +1054,9 @@ function renderTabellaOperativi(){
         if(gruppo<4){const trSpacer=document.createElement('tr');trSpacer.className='riga-separatore';trSpacer.innerHTML='<td colspan="6"></td>';tbody.appendChild(trSpacer);}
     }
 }
-
 function selezionaRisorsaSchema(tipo,indice,cid){
     if(!mspCorrenteSchema)return;
     const datiMSP=garantisciStrutturaMSP(mspCorrenteSchema);
-    // ✅ FIX: normalizza il CID come stringa con padding
     const cidNorm = cid ? String(cid).trim().padStart(8, '0') : '';
     if(tipo==='tecnico'){
         datiMSP.tecnici[indice].cid = cidNorm;
@@ -936,7 +1066,6 @@ function selezionaRisorsaSchema(tipo,indice,cid){
     saveDataToSheets('team_schema_nominativi_db', schemaNominativi);
     aggiornaSchemaNominativi();
 }
-
 function esportaSchemaNominativiExcel(){const wb=XLSX.utils.book_new();Object.keys(schemaNominativi).sort().forEach(msp=>{const datiMSP=schemaNominativi[msp];if(!datiMSP)return;const datiTecnici=[["SQ.","CID","Cognome Nome","MSP","Sede","Residenza","Cell. Lavoro","Cell. Privato"]];datiMSP.tecnici.forEach(riga=>{const dip=(riga.cid&&riga.cid.trim()!=='')?dipendenti.find(d=>d.cid===riga.cid):null;datiTecnici.push([riga.gruppo,riga.cid||'',dip?`${dip.cognome} ${dip.nome}`:'',msp,dip?dip.sedeLavoro:'',dip?dip.residenza:'',dip?dip.cellLavoro:'',dip?dip.cellPrivato:'']);});XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiTecnici),`Tecnici_${msp}`);const datiOperativi=[["SQ.","CID","Cognome Nome","MSP","Sede","Residenza","Cell. Lavoro","Cell. Privato"]];datiMSP.operativi.forEach(riga=>{const dip=(riga.cid&&riga.cid.trim()!=='')?dipendenti.find(d=>d.cid===riga.cid):null;datiOperativi.push([riga.gruppo,riga.cid||'',dip?`${dip.cognome} ${dip.nome}`:'',msp,dip?dip.sedeLavoro:'',dip?dip.residenza:'',dip?dip.cellLavoro:'',dip?dip.cellPrivato:'']);});XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiOperativi),`Operativi_${msp}`);});XLSX.writeFile(wb,`Schema_Nominativi_TuttiMSP.xlsx`);}
 function importaSchemaNominativiExcel(e){const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=function(evt){try{const data=new Uint8Array(evt.target.result);const wb=XLSX.read(data,{type:'array'});const fogliTecnici=Object.keys(wb.Sheets).filter(k=>k.startsWith('Tecnici_'));const fogliOperativi=Object.keys(wb.Sheets).filter(k=>k.startsWith('Operativi_'));const tuttiMSP=new Set();fogliTecnici.forEach(k=>tuttiMSP.add(k.replace('Tecnici_','')));fogliOperativi.forEach(k=>tuttiMSP.add(k.replace('Operativi_','')));if(tuttiMSP.size===0){if(wb.Sheets["Tecnici"]){const jsonTecnici=XLSX.utils.sheet_to_json(wb.Sheets["Tecnici"],{header:1}).slice(1);const datiMSP=garantisciStrutturaMSP(mspCorrenteSchema);datiMSP.tecnici=jsonTecnici.map(r=>({gruppo:parseInt(r[0])||1,cid:(r[1]&&String(r[1]).trim()!=='')?formattaCID(String(r[1])):''}));}if(wb.Sheets["Operativi"]){const jsonOperativi=XLSX.utils.sheet_to_json(wb.Sheets["Operativi"],{header:1}).slice(1);const datiMSP=garantisciStrutturaMSP(mspCorrenteSchema);datiMSP.operativi=jsonOperativi.map(r=>({gruppo:parseInt(r[0])||1,cid:(r[1]&&String(r[1]).trim()!=='')?formattaCID(String(r[1])):''}));}}else{tuttiMSP.forEach(msp=>{const datiMSP=garantisciStrutturaMSP(msp);if(wb.Sheets[`Tecnici_${msp}`]){const jsonTecnici=XLSX.utils.sheet_to_json(wb.Sheets[`Tecnici_${msp}`],{header:1}).slice(1);datiMSP.tecnici=jsonTecnici.map(r=>({gruppo:parseInt(r[0])||1,cid:(r[1]&&String(r[1]).trim()!=='')?formattaCID(String(r[1])):''}));}if(wb.Sheets[`Operativi_${msp}`]){const jsonOperativi=XLSX.utils.sheet_to_json(wb.Sheets[`Operativi_${msp}`],{header:1}).slice(1);datiMSP.operativi=jsonOperativi.map(r=>({gruppo:parseInt(r[0])||1,cid:(r[1]&&String(r[1]).trim()!=='')?formattaCID(String(r[1])):''}));}});}saveDataToSheets('team_schema_nominativi_db', schemaNominativi);popolaFiltroMSPSchemaNominativi();aggiornaSchemaNominativi();alert("Schema nominativi importato con successo!");}catch(err){alert("Errore lettura Excel: "+err.message);}};reader.readAsArrayBuffer(file);e.target.value='';}
 function stampaSchemaReperibilita(){const anno=document.getElementById('annoSchemaReperibilita').value;document.querySelectorAll('.tab-contenuto').forEach(el=>el.classList.add('hidden'));const container=document.createElement('div');container.className='active-for-print';container.id='containerStampaTemp';const pagina1=document.createElement('div');pagina1.className='pagina-stampa';const caption1=document.createElement('div');caption1.style.cssText='text-align:center;font-size:18px;font-weight:bold;margin-bottom:15px;color:#1e293b;';caption1.textContent=`MS dist. Reggio E. REPERIBILITA' ANNO ${anno}`;pagina1.appendChild(caption1);const schemaClone=document.querySelector('#tabellaSchemaReperibilita').parentElement.cloneNode(true);pagina1.appendChild(schemaClone);container.appendChild(pagina1);const pagina2=document.createElement('div');pagina2.className='pagina-stampa';const titoloTabella=document.createElement('h2');titoloTabella.style.cssText='text-align:center;font-size:18px;font-weight:bold;margin-bottom:15px;color:#1e293b;';titoloTabella.textContent=`SCHEMA NOMINATIVI REPERIBILITÀ - MSP: ${mspCorrenteSchema||'Nessuno'}`;pagina2.appendChild(titoloTabella);if(mspCorrenteSchema&&schemaNominativi[mspCorrenteSchema]){const datiMSP=schemaNominativi[mspCorrenteSchema];const tabTecnici=document.createElement('table');tabTecnici.className='tabella-nominativi';tabTecnici.style.maxWidth='100%';let htmlTecnici='<thead><tr><th colspan="6" class="sezione-header">TECNICI MSP</th></tr>';htmlTecnici+='<tr><th class="col-sq">SQ.</th><th class="col-nominativo">Nominativo</th><th class="col-sede">Sede</th><th class="col-residenza">Residenza</th><th class="col-cell">Cell. Lavoro</th><th class="col-cell">Cell. Privato</th></tr></thead><tbody>';for(let gruppo=1;gruppo<=4;gruppo++){const righeGruppo=datiMSP.tecnici.filter(n=>n.gruppo===gruppo);righeGruppo.slice(0,4).forEach((riga,idx)=>{const dip=(riga.cid&&riga.cid.trim()!=='')?dipendenti.find(d=>d.cid===riga.cid):null;htmlTecnici+=`<tr>${idx===0?`<td class="sq-cell" rowspan="4">${gruppo}</td>`:''}<td>${dip?`${dip.cognome} ${dip.nome}`:''}</td><td>${dip?dip.sedeLavoro:''}</td><td>${dip?dip.residenza:''}</td><td>${dip?dip.cellLavoro:''}</td><td>${dip?dip.cellPrivato:''}</td></tr>`;});if(gruppo<4)htmlTecnici+='<tr class="riga-separatore"><td colspan="6"></td></tr>';}htmlTecnici+='</tbody>';tabTecnici.innerHTML=htmlTecnici;pagina2.appendChild(tabTecnici);const spacer=document.createElement('div');spacer.style.height='20px';pagina2.appendChild(spacer);const tabOperativi=document.createElement('table');tabOperativi.className='tabella-nominativi';tabOperativi.style.maxWidth='100%';let htmlOperativi='<thead><tr><th colspan="6" class="sezione-header">OPERATIVI MSP</th></tr>';htmlOperativi+='<tr><th class="col-sq">SQ.</th><th class="col-nominativo">Nominativo</th><th class="col-sede">Sede</th><th class="col-residenza">Residenza</th><th class="col-cell">Cell. Lavoro</th><th class="col-cell">Cell. Privato</th></tr></thead><tbody>';for(let gruppo=1;gruppo<=4;gruppo++){const righeGruppo=datiMSP.operativi.filter(n=>n.gruppo===gruppo);righeGruppo.slice(0,6).forEach((riga,idx)=>{const dip=(riga.cid&&riga.cid.trim()!=='')?dipendenti.find(d=>d.cid===riga.cid):null;htmlOperativi+=`<tr>${idx===0?`<td class="sq-cell" rowspan="6">${gruppo}</td>`:''}<td>${dip?`${dip.cognome} ${dip.nome}`:''}</td><td>${dip?dip.sedeLavoro:''}</td><td>${dip?dip.residenza:''}</td><td>${dip?dip.cellLavoro:''}</td><td>${dip?dip.cellPrivato:''}</td></tr>`;});if(gruppo<4)htmlOperativi+='<tr class="riga-separatore"><td colspan="6"></td></tr>';}htmlOperativi+='</tbody>';tabOperativi.innerHTML=htmlOperativi;pagina2.appendChild(tabOperativi);}else{pagina2.innerHTML+='<p class="text-center text-slate-500 italic">Nessun dato disponibile per l\'MSP selezionato.</p>';}container.appendChild(pagina2);document.body.appendChild(container);setTimeout(()=>{window.print();setTimeout(()=>{const tempContainer=document.getElementById('containerStampaTemp');if(tempContainer)document.body.removeChild(tempContainer);cambiaTab('reperibilita');},500);},300);}
@@ -1201,15 +1330,15 @@ function aggiornaDatalistAutocompletamento(){
     const dlDesc=document.getElementById('datalistDescrizione');
     if(dlDesc){dlDesc.innerHTML=descUnici.map(v=>`<option value="${v}">`).join('');}
 }
-function esportaDatabaseExcel(){const wb=XLSX.utils.book_new();const datiDip=[["CID","Cognome","Nome","Nominativo","Suffisso_Email","MSP","CdL","Classe","Distaccamento","Pat","TurnoRep","SedeLavoro","Residenza","CellLavoro","CellPrivato","Email","IngressoMS","Quiescenza","DecorrenzaInq","Inq"]];dipendenti.forEach(d=>datiDip.push([formattaCID(d.cid),d.cognome,d.nome,d.nominativo,d.suffisso_email,d.msp,d.cdL,d.classe,d.distaccamento,d.pat,d.turnoRep,d.sedeLavoro,d.residenza,d.cellLavoro,d.cellPrivato,d.email,d.ingressoMS,d.quiescenza,d.decorrenzaInq,d.inq]));XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiDip),"Dipendenti");const datiFest=[["ID","Nome","Giorno","Mese","Tipo","Sede"]];festivitaCustom.forEach(f=>datiFest.push([f.id,f.nome,f.giorno,f.mese,f.tipo,f.sede||'']));XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiFest),"Festivita");const datiAtt=[["ID","CID","Data","Tipo","OdM","Descrizione","Ore","Minuti","OP","OreNorm","MinNorm","OreSpec","MinSpec"]];attivitaCalendario.forEach(a=>datiAtt.push([a.id,formattaCID(a.cid),a.data,a.tipo,a.odm,a.desc,a.ore,a.min,a.op,a.oreNorm||0,a.minNorm||0,a.oreSpec||0,a.minSpec||0]));XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiAtt),"Attivita");const datiTurni=[["Anno","Settimana_ISO","Gruppo_Reperibilita"]];const anniOrdinati=Object.keys(MATRICE_REPERIBILITA).sort((a,b)=>a-b);anniOrdinati.forEach(anno=>{const sequenza=MATRICE_REPERIBILITA[anno];sequenza.forEach((gruppo,indexSettimana)=>{datiTurni.push([parseInt(anno),indexSettimana+1,gruppo]);});});XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiTurni),"Turni_Reperibilita");const datiCons=[["ID","CID","Data","ODM","OP","Ore","Min","OreNorm","MinNorm","OreSpec","MinSpec"]];consuntivazioneData.forEach(c=>datiCons.push([c.id,formattaCID(c.cid),c.data,c.odm,c.op,c.ore,c.min,c.oreNorm||0,c.minNorm||0,c.oreSpec||0,c.minSpec||0]));XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiCons),"Consuntivazione");XLSX.writeFile(wb,"Database_Completo_EM.xlsx");}
-function importaDatabaseExcel(e){const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=function(evt){try{const data=new Uint8Array(evt.target.result);const wb=XLSX.read(data,{type:'array'});if(wb.Sheets["Dipendenti"]){const jsonDip=XLSX.utils.sheet_to_json(wb.Sheets["Dipendenti"],{header:1}).slice(1);if(jsonDip.length>0){dipendenti=jsonDip.map(r=>({cid:formattaCID(String(r[0]||'')),cognome:String(r[1]||''),nome:String(r[2]||''),nominativo:String(r[3]||''),suffisso_email:String(r[4]||''),msp:String(r[5]||''),cdL:String(r[6]||''),classe:String(r[7]||''),distaccamento:String(r[8]||''),pat:String(r[9]||''),turnoRep:String(r[10]||''),sedeLavoro:String(r[11]||''),residenza:String(r[12]||''),cellLavoro:String(r[13]||''),cellPrivato:String(r[14]||''),email:String(r[15]||''),ingressoMS:formattaDataExcel(r[16]),quiescenza:formattaDataExcel(r[17]),decorrenzaInq:formattaDataExcel(r[18]),inq:String(r[19]||'')}));}}if(wb.Sheets["Festivita"]){const jsonFest=XLSX.utils.sheet_to_json(wb.Sheets["Festivita"],{header:1}).slice(1);if(jsonFest.length>0)festivitaCustom=jsonFest.map(r=>({id:String(r[0]||Date.now()),nome:String(r[1]||''),giorno:parseInt(r[2])||1,mese:parseInt(r[3])||0,tipo:String(r[4]||'PATRONO'),sede:String(r[5]||'')}));}if(wb.Sheets["Attivita"]){const jsonAtt=XLSX.utils.sheet_to_json(wb.Sheets["Attivita"],{header:1}).slice(1);if(jsonAtt.length>0)attivitaCalendario=jsonAtt.map(r=>({id:String(r[0]||Date.now()),cid:formattaCID(String(r[1]||'')),data:String(r[2]||''),tipo:String(r[3]||''),odm:String(r[4]||''),desc:String(r[5]||''),ore:parseInt(r[6])||0,min:parseInt(r[7])||0,op:String(r[8]||''),oreNorm:parseInt(r[9])||0,minNorm:parseInt(r[10])||0,oreSpec:parseInt(r[11])||0,minSpec:parseInt(r[12])||0}));}if(wb.Sheets["Turni_Reperibilita"]){const jsonTurni=XLSX.utils.sheet_to_json(wb.Sheets["Turni_Reperibilita"],{header:1}).slice(1);if(jsonTurni.length>0){MATRICE_REPERIBILITA={};jsonTurni.forEach(r=>{const anno=parseInt(r[0]);const settimana=parseInt(r[1]);const gruppo=parseInt(r[2]);if(anno&&settimana&&gruppo){if(!MATRICE_REPERIBILITA[anno])MATRICE_REPERIBILITA[anno]=[];MATRICE_REPERIBILITA[anno][settimana-1]=gruppo;}});}}else{MATRICE_REPERIBILITA=JSON.parse(JSON.stringify(MATRICE_REPERIBILITA_DEFAULT));}if(wb.Sheets["Consuntivazione"]){const jsonCons=XLSX.utils.sheet_to_json(wb.Sheets["Consuntivazione"],{header:1}).slice(1);if(jsonCons.length>0)consuntivazioneData=jsonCons.map(r=>({id:String(r[0]||Date.now()),cid:formattaCID(String(r[1]||'')),data:String(r[2]||''),odm:String(r[3]||''),op:String(r[4]||''),ore:parseInt(r[5])||0,min:parseInt(r[6])||0,oreNorm:parseInt(r[7])||0,minNorm:parseInt(r[8])||0,oreSpec:parseInt(r[9])||0,minSpec:parseInt(r[10])||0}));}
+function esportaDatabaseExcel(){const wb=XLSX.utils.book_new();const datiDip=[["CID","Cognome","Nome","Nominativo","Suffisso_Email","MSP","CdL","Classe","Distaccamento","Pat","TurnoRep","SedeLavoro","Residenza","CellLavoro","CellPrivato","Email","IngressoMS","Quiescenza","DecorrenzaInq","Inq"]];dipendenti.forEach(d=>datiDip.push([formattaCID(d.cid),d.cognome,d.nome,d.nominativo,d.suffisso_email,d.msp,d.cdL,d.classe,d.distaccamento,d.pat,d.turnoRep,d.sedeLavoro,d.residenza,d.cellLavoro,d.cellPrivato,d.email,d.ingressoMS,d.quiescenza,d.decorrenzaInq,d.inq]));XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiDip),"Dipendenti");const datiFest=[["ID","Nome","Giorno","Mese","Tipo","Sede"]];festivitaCustom.forEach(f=>datiFest.push([f.id,f.nome,f.giorno,f.mese,f.tipo,f.sede||'']));XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiFest),"Festivita");const datiAtt=[["ID","CID","Data","Tipo","OdM","Descrizione","Ore","Minuti","OP","OreNorm","MinNorm","OreSpec","MinSpec"]];attivitaCalendario.forEach(a=>datiAtt.push([a.id,formattaCID(a.cid),a.data,a.tipo,a.odm,a.desc,a.ore,a.min,a.op,a.oreNorm||0,a.minNorm||0,a.oreSpec||0,a.minSpec||0]));XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiAtt),"Attivita");const datiTurni=[["Anno","Settimana_ISO","Gruppo_Reperibilita"]];const anniOrdinati=Object.keys(MATRICE_REPERIBILITA).sort((a,b)=>a-b);anniOrdinati.forEach(anno=>{const sequenza=MATRICE_REPERIBILITA[anno];sequenza.forEach((gruppo,indexSettimana)=>{datiTurni.push([parseInt(anno),indexSettimana+1,gruppo]);});});XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiTurni),"Turni_Reperibilita");const datiCons=[["ID","CID","Data","ODM","OP","Ore","Min","OreNorm","MinNorm","OreSpec","MinSpec"]];consuntivazioneData.forEach(c=>datiCons.push([c.id,formattaCID(c.cid),c.data,c.odm,c.op,c.ore,c.min,c.oreNorm||0,c.minNorm||0,c.oreSpec||0,c.minSpec||0]));XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiCons),"Consuntivazione");const datiOdm = [["OdM", "Testo_br", "OP", "FB", "Unita", "St.Sis"]];Object.values(window.odmDatabase).forEach(rec => {datiOdm.push([rec.odm, '', rec.op, '', rec.unita, rec.stSis]);});XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(datiOdm), "ODM");XLSX.writeFile(wb,"Database_Completo_EM.xlsx");}
+function importaDatabaseExcel(e){const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=function(evt){try{const data=new Uint8Array(evt.target.result);const wb=XLSX.read(data,{type:'array'});if(wb.Sheets["Dipendenti"]){const jsonDip=XLSX.utils.sheet_to_json(wb.Sheets["Dipendenti"],{header:1}).slice(1);if(jsonDip.length>0){dipendenti=jsonDip.map(r=>({cid:formattaCID(String(r[0]||'')),cognome:String(r[1]||''),nome:String(r[2]||''),nominativo:String(r[3]||''),suffisso_email:String(r[4]||''),msp:String(r[5]||''),cdL:String(r[6]||''),classe:String(r[7]||''),distaccamento:String(r[8]||''),pat:String(r[9]||''),turnoRep:String(r[10]||''),sedeLavoro:String(r[11]||''),residenza:String(r[12]||''),cellLavoro:String(r[13]||''),cellPrivato:String(r[14]||''),email:String(r[15]||''),ingressoMS:formattaDataExcel(r[16]),quiescenza:formattaDataExcel(r[17]),decorrenzaInq:formattaDataExcel(r[18]),inq:String(r[19]||'')}));}}if(wb.Sheets["Festivita"]){const jsonFest=XLSX.utils.sheet_to_json(wb.Sheets["Festivita"],{header:1}).slice(1);if(jsonFest.length>0)festivitaCustom=jsonFest.map(r=>({id:String(r[0]||Date.now()),nome:String(r[1]||''),giorno:parseInt(r[2])||1,mese:parseInt(r[3])||0,tipo:String(r[4]||'PATRONO'),sede:String(r[5]||'')}));}if(wb.Sheets["Attivita"]){const jsonAtt=XLSX.utils.sheet_to_json(wb.Sheets["Attivita"],{header:1}).slice(1);if(jsonAtt.length>0)attivitaCalendario=jsonAtt.map(r=>({id:String(r[0]||Date.now()),cid:formattaCID(String(r[1]||'')),data:String(r[2]||''),tipo:String(r[3]||''),odm:String(r[4]||''),desc:String(r[5]||''),ore:parseInt(r[6])||0,min:parseInt(r[7])||0,op:String(r[8]||''),oreNorm:parseInt(r[9])||0,minNorm:parseInt(r[10])||0,oreSpec:parseInt(r[11])||0,minSpec:parseInt(r[12])||0}));}if(wb.Sheets["Turni_Reperibilita"]){const jsonTurni=XLSX.utils.sheet_to_json(wb.Sheets["Turni_Reperibilita"],{header:1}).slice(1);if(jsonTurni.length>0){MATRICE_REPERIBILITA={};jsonTurni.forEach(r=>{const anno=parseInt(r[0]);const settimana=parseInt(r[1]);const gruppo=parseInt(r[2]);if(anno&&settimana&&gruppo){if(!MATRICE_REPERIBILITA[anno])MATRICE_REPERIBILITA[anno]=[];MATRICE_REPERIBILITA[anno][settimana-1]=gruppo;}});}}else{MATRICE_REPERIBILITA=JSON.parse(JSON.stringify(MATRICE_REPERIBILITA_DEFAULT));}if(wb.Sheets["Consuntivazione"]){const jsonCons=XLSX.utils.sheet_to_json(wb.Sheets["Consuntivazione"],{header:1}).slice(1);if(jsonCons.length>0)consuntivazioneData=jsonCons.map(r=>({id:String(r[0]||Date.now()),cid:formattaCID(String(r[1]||'')),data:String(r[2]||''),odm:String(r[3]||''),op:String(r[4]||''),ore:parseInt(r[5])||0,min:parseInt(r[6])||0,oreNorm:parseInt(r[7])||0,minNorm:parseInt(r[8])||0,oreSpec:parseInt(r[9])||0,minSpec:parseInt(r[10])||0}));}if(wb.Sheets["ODM"]){const jsonOdm=XLSX.utils.sheet_to_json(wb.Sheets["ODM"],{header:1}).slice(1);let count=0;jsonOdm.forEach(r=>{const odm=String(r[0]||'').trim();const op=String(r[2]||'').trim();const unita=String(r[4]||'').trim();const stSis=String(r[5]||'').trim();if(odm&&op&&!isNaN(parseInt(odm))){const key=`${odm}_${op}`;if(!window.odmDatabase[key]){window.odmDatabase[key]={odm:odm,op:op,unita:unita,stSis:stSis,valido:stSis.toUpperCase()!=='APER'};count++;}}});console.log(`✅ Importati ${count} nuovi record OdM dal file Excel.`);}
 saveDataToSheets('team_dipendenti_db', dipendenti);
 saveDataToSheets('team_festivita_db', festivitaCustom);
 saveDataToSheets('team_attivita_db', attivitaCalendario);
 saveDataToSheets('team_consuntivazione_db', consuntivazioneData);
 saveDataToSheets('team_schema_nominativi_db', schemaNominativi);
 saveDataToSheets('team_matrice_reperibilita_db', MATRICE_REPERIBILITA);
-renderDipendenti();popolaFiltroMSP();renderFestivita();aggiornaCalendario();generaTabellaReperibilita(document.getElementById('annoSchemaReperibilita').value);popolaFiltroMSPSchemaNominativi();aggiornaSchemaNominativi();aggiornaIndicatoreSpazio();aggiornaDatalistAutocompletamento();alert("✅ Database caricato con successo! I dati sono stati sincronizzati con Google Sheets.");}catch(err){alert("❌ Errore lettura Excel: "+err.message);}};reader.readAsArrayBuffer(file);e.target.value='';}
+renderDipendenti();popolaFiltroMSP();renderFestivita();aggiornaCalendario();generaTabellaReperibilita(document.getElementById('annoSchemaReperibilita').value);popolaFiltroMSPSchemaNominativi();aggiornaSchemaNominativi();aggiornaIndicatoreSpazio();aggiornaDatalistAutocompletamento();aggiornaContatoreOdM();alert("✅ Database caricato con successo! I dati sono stati sincronizzati con Google Sheets.");}catch(err){alert("❌ Errore lettura Excel: "+err.message);}};reader.readAsArrayBuffer(file);e.target.value='';}
 </script>
 </body>
 </html>

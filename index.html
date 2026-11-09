@@ -23,6 +23,11 @@ let dbData = {
 };
 window.isLoadingData = false;
 
+// ✅ VARIABILI PER POLLING IN TEMPO REALE
+let ultimoHashDati = '';
+let pollingAttivo = true;
+let utenteStaScrivendo = false;
+
 function dataLocaleToString(d) {
     if (!d) return '';
     const anno = d.getFullYear();
@@ -194,6 +199,100 @@ function normalizzaDatiCaricati() {
     });
 }
 
+// ✅ FUNZIONE POLLING: Calcola hash dei dati per rilevare modifiche
+function calcolaHashDati() {
+    const dati = {
+        dip: dipendenti.length,
+        att: attivitaCalendario.length,
+        cons: consuntivazioneData.length,
+        fest: festivitaCustom.length,
+        odm: Object.keys(window.odmDatabase).length,
+        schema: JSON.stringify(schemaNominativi).length,
+        matrice: JSON.stringify(MATRICE_REPERIBILITA).length
+    };
+    return JSON.stringify(dati);
+}
+
+// ✅ FUNZIONE POLLING: Controlla aggiornamenti ogni 30 secondi
+async function pollingDati() {
+    if (!pollingAttivo || utenteStaScrivendo || window._isInitializing) return;
+    try {
+        const response = await fetch(GOOGLE_SCRIPT_URL);
+        if (!response.ok) return;
+        const data = await response.json();
+        if (data.error) return;
+        
+        const nuovoHash = JSON.stringify({
+            dip: (data.team_dipendenti_db || []).length,
+            att: (data.team_attivita_db || []).length,
+            cons: (data.team_consuntivazione_db || []).length,
+            fest: (data.team_festivita_db || []).length,
+            odm: (data.team_odm_db || []).length
+        });
+        
+        if (nuovoHash !== ultimoHashDati && ultimoHashDati !== '') {
+            console.log('🔄 Aggiornamento dati rilevato da altro utente!');
+            
+            dipendenti = data.team_dipendenti_db || [];
+            attivitaCalendario = data.team_attivita_db || [];
+            consuntivazioneData = data.team_consuntivazione_db || [];
+            festivitaCustom = data.team_festivita_db || [];
+            schemaNominativiRaw = data.team_schema_nominativi_db || {};
+            MATRICE_REPERIBILITA = data.team_matrice_reperibilita_db || {};
+            
+            window.odmDatabase = {};
+            (data.team_odm_db || []).forEach(row => {
+                const odm = String(row['OdM'] || row['odm'] || '').trim();
+                let op = String(row['OP'] || row['op'] || '').trim();
+                const unita = String(row['Unita'] || row['unita'] || '').trim();
+                const stSis = String(row['St.Sis'] || row['stSis'] || '').trim();
+                if (op && !isNaN(op) && op.length < 4) op = op.padStart(4, '0');
+                if (odm && op && !isNaN(parseInt(odm))) {
+                    window.odmDatabase[`${odm}_${op}`] = {
+                        odm, op, unita, stSis,
+                        valido: stSis.toUpperCase() !== 'APER'
+                    };
+                }
+            });
+            
+            normalizzaDatiCaricati();
+            
+            renderDipendenti();
+            renderFestivita();
+            aggiornaCalendario();
+            aggiornaSchemaNominativi();
+            generaTabellaReperibilita(document.getElementById('annoSchemaReperibilita').value);
+            aggiornaContatoreOdM();
+            
+            if (!document.getElementById('sezione-consuntivazione').classList.contains('hidden')) {
+                aggiornaConsuntivazione();
+            }
+            
+            mostraNotifica('🔄 Dati aggiornati (modifiche da altro utente)');
+        }
+        
+        ultimoHashDati = nuovoHash;
+    } catch (error) {
+        console.error('❌ Errore polling:', error);
+    }
+}
+
+// ✅ FUNZIONE POLLING: Mostra notifica visiva
+function mostraNotifica(testo) {
+    const div = document.createElement('div');
+    div.style.cssText = 'position:fixed;top:80px;right:20px;background:#10b981;color:white;padding:12px 20px;border-radius:8px;box-shadow:0 4px 6px rgba(0,0,0,0.2);z-index:99999;font-weight:600;font-size:13px;';
+    div.textContent = testo;
+    document.body.appendChild(div);
+    setTimeout(() => div.remove(), 3000);
+}
+
+// ✅ POLLING: Ferma quando l'utente sta scrivendo
+document.addEventListener('input', () => {
+    utenteStaScrivendo = true;
+    clearTimeout(window._typingTimer);
+    window._typingTimer = setTimeout(() => { utenteStaScrivendo = false; }, 5000);
+});
+
 function caricaFileOdM(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -217,9 +316,7 @@ function caricaFileOdM(event) {
                 const fb = String(row[3] || '').trim();
                 const unita = String(row[4] || '').trim();
                 const stSis = String(row[5] || '').trim();
-                
                 if (op && !isNaN(op) && op.length < 4) op = op.padStart(4, '0');
-                
                 if (odm === 'OdM' || odm === '' || odm === '---' || isNaN(parseInt(odm))) { skipped++; continue; }
                 if (odm && op) {
                     const key = `${odm}_${op}`;
@@ -316,19 +413,15 @@ async function loadDataFromSheets() {
         consuntivazioneData = data.team_consuntivazione_db || [];
         schemaNominativiRaw = data.team_schema_nominativi_db || {};
         MATRICE_REPERIBILITA = data.team_matrice_reperibilita_db || {};
-        
         window.odmDatabase = {};
         const odmData = data.team_odm_db || [];
         console.log(`📦 Caricati ${odmData.length} record OdM grezzi dal database.`);
-        
         odmData.forEach(row => {
             const odm = String(row['OdM'] || row['odm'] || row['ODM'] || '').trim();
             let op = String(row['OP'] || row['op'] || '').trim();
             const unita = String(row['Unita'] || row['unita'] || row['UNITA'] || '').trim();
             const stSis = String(row['St.Sis'] || row['stSis'] || row['St_Sis'] || row['STSIS'] || '').trim();
-            
             if (op && !isNaN(op) && op.length < 4) op = op.padStart(4, '0');
-            
             if (odm && op && !isNaN(parseInt(odm))) {
                 const key = `${odm}_${op}`;
                 window.odmDatabase[key] = {
@@ -337,9 +430,7 @@ async function loadDataFromSheets() {
                 };
             }
         });
-        
         console.log(`✅ Database OdM popolato: ${Object.keys(window.odmDatabase).length} record unici.`);
-        
         normalizzaDatiCaricati();
         window.dbData = data;
         console.log('📊 OdM caricati:', Object.keys(window.odmDatabase).length);
@@ -348,6 +439,10 @@ async function loadDataFromSheets() {
             window._isInitializing = false;
             console.log('✅ Inizializzazione completata.');
             aggiornaContatoreOdM();
+            // ✅ AVVIO POLLING dopo caricamento iniziale
+            ultimoHashDati = calcolaHashDati();
+            setInterval(pollingDati, 30000);
+            console.log('✅ Polling avviato (ogni 30s)');
         }, 2000);
     } catch (error) {
         console.error('❌ Errore di rete:', error);
@@ -921,88 +1016,102 @@ function selezionaRisorsaSchema(tipo,indice,cid){
 function esportaSchemaNominativiExcel(){const wb=XLSX.utils.book_new();Object.keys(schemaNominativi).sort().forEach(msp=>{const datiMSP=schemaNominativi[msp];if(!datiMSP)return;const datiTecnici=[["SQ.","CID","Cognome Nome","MSP","Sede","Residenza","Cell. Lavoro","Cell. Privato"]];datiMSP.tecnici.forEach(riga=>{const dip=(riga.cid&&riga.cid.trim()!=='')?dipendenti.find(d=>d.cid===riga.cid):null;datiTecnici.push([riga.gruppo,riga.cid||'',dip?`${dip.cognome} ${dip.nome}`:'',msp,dip?dip.sedeLavoro:'',dip?dip.residenza:'',dip?dip.cellLavoro:'',dip?dip.cellPrivato:'']);});XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiTecnici),`Tecnici_${msp}`);const datiOperativi=[["SQ.","CID","Cognome Nome","MSP","Sede","Residenza","Cell. Lavoro","Cell. Privato"]];datiMSP.operativi.forEach(riga=>{const dip=(riga.cid&&riga.cid.trim()!=='')?dipendenti.find(d=>d.cid===riga.cid):null;datiOperativi.push([riga.gruppo,riga.cid||'',dip?`${dip.cognome} ${dip.nome}`:'',msp,dip?dip.sedeLavoro:'',dip?dip.residenza:'',dip?dip.cellLavoro:'',dip?dip.cellPrivato:'']);});XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiOperativi),`Operativi_${msp}`);});XLSX.writeFile(wb,`Schema_Nominativi_TuttiMSP.xlsx`);}
 function importaSchemaNominativiExcel(e){const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=function(evt){try{const data=new Uint8Array(evt.target.result);const wb=XLSX.read(data,{type:'array'});const fogliTecnici=Object.keys(wb.Sheets).filter(k=>k.startsWith('Tecnici_'));const fogliOperativi=Object.keys(wb.Sheets).filter(k=>k.startsWith('Operativi_'));const tuttiMSP=new Set();fogliTecnici.forEach(k=>tuttiMSP.add(k.replace('Tecnici_','')));fogliOperativi.forEach(k=>tuttiMSP.add(k.replace('Operativi_','')));if(tuttiMSP.size===0){if(wb.Sheets["Tecnici"]){const jsonTecnici=XLSX.utils.sheet_to_json(wb.Sheets["Tecnici"],{header:1}).slice(1);const datiMSP=garantisciStrutturaMSP(mspCorrenteSchema);datiMSP.tecnici=jsonTecnici.map(r=>({gruppo:parseInt(r[0])||1,cid:(r[1]&&String(r[1]).trim()!=='')?formattaCID(String(r[1])):''}));}if(wb.Sheets["Operativi"]){const jsonOperativi=XLSX.utils.sheet_to_json(wb.Sheets["Operativi"],{header:1}).slice(1);const datiMSP=garantisciStrutturaMSP(mspCorrenteSchema);datiMSP.operativi=jsonOperativi.map(r=>({gruppo:parseInt(r[0])||1,cid:(r[1]&&String(r[1]).trim()!=='')?formattaCID(String(r[1])):''}));}}else{tuttiMSP.forEach(msp=>{const datiMSP=garantisciStrutturaMSP(msp);if(wb.Sheets[`Tecnici_${msp}`]){const jsonTecnici=XLSX.utils.sheet_to_json(wb.Sheets[`Tecnici_${msp}`],{header:1}).slice(1);datiMSP.tecnici=jsonTecnici.map(r=>({gruppo:parseInt(r[0])||1,cid:(r[1]&&String(r[1]).trim()!=='')?formattaCID(String(r[1])):''}));}if(wb.Sheets[`Operativi_${msp}`]){const jsonOperativi=XLSX.utils.sheet_to_json(wb.Sheets[`Operativi_${msp}`],{header:1}).slice(1);datiMSP.operativi=jsonOperativi.map(r=>({gruppo:parseInt(r[0])||1,cid:(r[1]&&String(r[1]).trim()!=='')?formattaCID(String(r[1])):''}));}});}saveDataToSheets('team_schema_nominativi_db', schemaNominativi);popolaFiltroMSPSchemaNominativi();aggiornaSchemaNominativi();alert("Schema nominativi importato con successo!");}catch(err){alert("Errore lettura Excel: "+err.message);}};reader.readAsArrayBuffer(file);e.target.value='';}
 
-// ✅ FIX: Stampa PDF con evidenziazione giallo SOLO per i Tecnici
+// ✅ FIX: Stampa PDF con tabella compatta ed evidenziazione giallo SOLO per i Tecnici
 function stampaSchemaReperibilita(){
     const anno=document.getElementById('annoSchemaReperibilita').value;
     document.querySelectorAll('.tab-contenuto').forEach(el=>el.classList.add('hidden'));
     const container=document.createElement('div');
     container.className='active-for-print';
     container.id='containerStampaTemp';
-    container.style.cssText='padding:20px;font-family:Arial,sans-serif;';
+    container.style.cssText='padding:10px;font-family:Arial,sans-serif;';
     
     // Pagina 1: Schema reperibilità
     const pagina1=document.createElement('div');
     pagina1.className='pagina-stampa';
     const caption1=document.createElement('div');
-    caption1.style.cssText='text-align:center;font-size:18px;font-weight:bold;margin-bottom:15px;color:#1e293b;';
+    caption1.style.cssText='text-align:center;font-size:16px;font-weight:bold;margin-bottom:10px;color:#1e293b;';
     caption1.textContent=`MS dist. Reggio E. REPERIBILITA' ANNO ${anno}`;
     pagina1.appendChild(caption1);
     const schemaClone=document.querySelector('#tabellaSchemaReperibilita').parentElement.cloneNode(true);
     pagina1.appendChild(schemaClone);
     container.appendChild(pagina1);
     
-    // Pagina 2: Schema Nominativi
+    // Pagina 2: Schema Nominativi COMPATTO
     const pagina2=document.createElement('div');
     pagina2.className='pagina-stampa';
     const titoloTabella=document.createElement('h2');
-    titoloTabella.style.cssText='text-align:center;font-size:18px;font-weight:bold;margin-bottom:15px;color:#1e293b;';
+    titoloTabella.style.cssText='text-align:center;font-size:15px;font-weight:bold;margin-bottom:8px;color:#1e293b;';
     titoloTabella.textContent=`SCHEMA NOMINATIVI REPERIBILITÀ - MSP: ${mspCorrenteSchema||'Nessuno'}`;
     pagina2.appendChild(titoloTabella);
     
-    // ✅ FIX: Usa garantisciStrutturaMSP per ottenere i dati corretti
-    if(mspCorrenteSchema){
-        const datiMSP=garantisciStrutturaMSP(mspCorrenteSchema);
+    if(mspCorrenteSchema && schemaNominativi[mspCorrenteSchema]){
+        const datiMSP=schemaNominativi[mspCorrenteSchema];
         
-        // ✅ Tabella Tecnici con evidenziazione giallo SOLO sul primo nominativo di ogni gruppo
+        // ✅ Layout compatto: Tecnici e Operativi affiancati
+        const wrapper=document.createElement('div');
+        wrapper.style.cssText='display:flex;gap:10px;justify-content:center;';
+        
+        // Tabella Tecnici COMPATTA con evidenziazione giallo SOLO sul primo nominativo
         const tabTecnici=document.createElement('table');
-        tabTecnici.style.cssText='width:100%;border-collapse:collapse;font-size:11px;background:white;margin-bottom:20px;';
-        let htmlTecnici='<thead><tr><th colspan="6" style="background:#1e40af;color:white;font-weight:800;font-size:12px;text-align:center;padding:6px;letter-spacing:0.5px;">TECNICI MSP</th></tr>';
-        htmlTecnici+='<tr><th style="background:#3b82f6;color:white;padding:5px 3px;font-weight:700;text-transform:uppercase;font-size:10px;text-align:center;width:35px;border:1px solid #1e40af;">SQ.</th><th style="background:#3b82f6;color:white;padding:5px 3px;font-weight:700;text-transform:uppercase;font-size:10px;text-align:center;width:195px;border:1px solid #1e40af;">Nominativo</th><th style="background:#3b82f6;color:white;padding:5px 3px;font-weight:700;text-transform:uppercase;font-size:10px;text-align:center;width:45px;border:1px solid #1e40af;">Sede</th><th style="background:#3b82f6;color:white;padding:5px 3px;font-weight:700;text-transform:uppercase;font-size:10px;text-align:center;width:135px;border:1px solid #1e40af;">Residenza</th><th style="background:#3b82f6;color:white;padding:5px 3px;font-weight:700;text-transform:uppercase;font-size:10px;text-align:center;width:105px;border:1px solid #1e40af;">Cell. Lavoro</th><th style="background:#3b82f6;color:white;padding:5px 3px;font-weight:700;text-transform:uppercase;font-size:10px;text-align:center;width:105px;border:1px solid #1e40af;">Cell. Privato</th></tr></thead><tbody>';
+        tabTecnici.style.cssText='width:48%;border-collapse:collapse;font-size:9px;background:white;';
+        let htmlTecnici='<thead><tr><th colspan="6" style="background:#1e40af;color:white;font-weight:800;font-size:10px;text-align:center;padding:3px;">TECNICI MSP (4/turno)</th></tr>';
+        htmlTecnici+='<tr>';
+        htmlTecnici+='<th style="background:#3b82f6;color:white;padding:2px;font-size:8px;width:25px;border:1px solid #1e40af;">SQ</th>';
+        htmlTecnici+='<th style="background:#3b82f6;color:white;padding:2px;font-size:8px;width:130px;border:1px solid #1e40af;">Nominativo</th>';
+        htmlTecnici+='<th style="background:#3b82f6;color:white;padding:2px;font-size:8px;width:30px;border:1px solid #1e40af;">Sede</th>';
+        htmlTecnici+='<th style="background:#3b82f6;color:white;padding:2px;font-size:8px;width:90px;border:1px solid #1e40af;">Residenza</th>';
+        htmlTecnici+='<th style="background:#3b82f6;color:white;padding:2px;font-size:8px;width:75px;border:1px solid #1e40af;">Cell.Lav</th>';
+        htmlTecnici+='<th style="background:#3b82f6;color:white;padding:2px;font-size:8px;width:75px;border:1px solid #1e40af;">Cell.Priv</th>';
+        htmlTecnici+='</tr></thead><tbody>';
         
         for(let gruppo=1;gruppo<=4;gruppo++){
             const righeGruppo=datiMSP.tecnici.filter(n=>n.gruppo===gruppo);
             righeGruppo.slice(0,4).forEach((riga,idx)=>{
-                const cidStr = String(riga.cid || '').trim().padStart(8, '0');
-                const dip = (cidStr !== '00000000' && cidStr !== '') ? dipendenti.find(d => d.cid === cidStr) : null;
+                const cidStr=String(riga.cid||'').trim().padStart(8,'0');
+                const dip=(cidStr!=='00000000'&&cidStr!=='')?dipendenti.find(d=>d.cid===cidStr):null;
                 const isFirst=idx===0;
                 // ✅ Evidenziazione giallo tenue SOLO per il primo nominativo di ogni gruppo (Tecnici)
                 const rowStyle=isFirst?'background:#fef9c3;-webkit-print-color-adjust:exact;print-color-adjust:exact;':'';
-                const cellStyle=`padding:3px;border:1px solid #cbd5e1;${rowStyle}`;
-                const sqStyle=`background:#dbeafe;font-weight:800;text-align:center;font-size:12px;color:#1e40af;width:35px;padding:3px;border:1px solid #cbd5e1;-webkit-print-color-adjust:exact;print-color-adjust:exact;`;
-                htmlTecnici+=`<tr style="${rowStyle}">${isFirst?`<td style="${sqStyle}" rowspan="4">${gruppo}</td>`:''}<td style="${cellStyle}">${dip?`${dip.cognome} ${dip.nome}`:''}</td><td style="${cellStyle}">${dip?dip.sedeLavoro:''}</td><td style="${cellStyle}">${dip?dip.residenza:''}</td><td style="${cellStyle}">${dip?dip.cellLavoro:''}</td><td style="${cellStyle}">${dip?dip.cellPrivato:''}</td></tr>`;
+                const cellStyle=`padding:1px 2px;border:1px solid #cbd5e1;font-size:9px;${rowStyle}`;
+                const sqStyle=`background:#dbeafe;font-weight:800;text-align:center;font-size:10px;color:#1e40af;padding:1px;border:1px solid #cbd5e1;${rowStyle}`;
+                htmlTecnici+=`<tr style="${rowStyle}">${isFirst?`<td style="${sqStyle}" rowspan="4">${gruppo}</td>`:''}<td style="${cellStyle}">${dip?`${dip.cognome} ${dip.nome}`:''}</td><td style="${cellStyle};text-align:center;">${dip?dip.sedeLavoro:''}</td><td style="${cellStyle}">${dip?dip.residenza:''}</td><td style="${cellStyle};font-size:8px;">${dip?dip.cellLavoro:''}</td><td style="${cellStyle};font-size:8px;">${dip?dip.cellPrivato:''}</td></tr>`;
             });
-            if(gruppo<4)htmlTecnici+='<tr style="height:5px;background:transparent;"><td colspan="6" style="padding:0;border:none;"></td></tr>';
+            if(gruppo<4)htmlTecnici+='<tr style="height:2px;"><td colspan="6" style="padding:0;border:none;"></td></tr>';
         }
         htmlTecnici+='</tbody>';
         tabTecnici.innerHTML=htmlTecnici;
-        pagina2.appendChild(tabTecnici);
+        wrapper.appendChild(tabTecnici);
         
-        // Spacer
-        const spacer=document.createElement('div');
-        spacer.style.height='20px';
-        pagina2.appendChild(spacer);
-        
-        // ✅ Tabella Operativi SENZA evidenziazione giallo
+        // Tabella Operativi COMPATTA SENZA evidenziazione giallo
         const tabOperativi=document.createElement('table');
-        tabOperativi.style.cssText='width:100%;border-collapse:collapse;font-size:11px;background:white;';
-        let htmlOperativi='<thead><tr><th colspan="6" style="background:#1e40af;color:white;font-weight:800;font-size:12px;text-align:center;padding:6px;letter-spacing:0.5px;">OPERATIVI MSP</th></tr>';
-        htmlOperativi+='<tr><th style="background:#3b82f6;color:white;padding:5px 3px;font-weight:700;text-transform:uppercase;font-size:10px;text-align:center;width:35px;border:1px solid #1e40af;">SQ.</th><th style="background:#3b82f6;color:white;padding:5px 3px;font-weight:700;text-transform:uppercase;font-size:10px;text-align:center;width:195px;border:1px solid #1e40af;">Nominativo</th><th style="background:#3b82f6;color:white;padding:5px 3px;font-weight:700;text-transform:uppercase;font-size:10px;text-align:center;width:45px;border:1px solid #1e40af;">Sede</th><th style="background:#3b82f6;color:white;padding:5px 3px;font-weight:700;text-transform:uppercase;font-size:10px;text-align:center;width:135px;border:1px solid #1e40af;">Residenza</th><th style="background:#3b82f6;color:white;padding:5px 3px;font-weight:700;text-transform:uppercase;font-size:10px;text-align:center;width:105px;border:1px solid #1e40af;">Cell. Lavoro</th><th style="background:#3b82f6;color:white;padding:5px 3px;font-weight:700;text-transform:uppercase;font-size:10px;text-align:center;width:105px;border:1px solid #1e40af;">Cell. Privato</th></tr></thead><tbody>';
+        tabOperativi.style.cssText='width:48%;border-collapse:collapse;font-size:9px;background:white;';
+        let htmlOperativi='<thead><tr><th colspan="6" style="background:#1e40af;color:white;font-weight:800;font-size:10px;text-align:center;padding:3px;">OPERATIVI MSP (6/turno)</th></tr>';
+        htmlOperativi+='<tr>';
+        htmlOperativi+='<th style="background:#3b82f6;color:white;padding:2px;font-size:8px;width:25px;border:1px solid #1e40af;">SQ</th>';
+        htmlOperativi+='<th style="background:#3b82f6;color:white;padding:2px;font-size:8px;width:130px;border:1px solid #1e40af;">Nominativo</th>';
+        htmlOperativi+='<th style="background:#3b82f6;color:white;padding:2px;font-size:8px;width:30px;border:1px solid #1e40af;">Sede</th>';
+        htmlOperativi+='<th style="background:#3b82f6;color:white;padding:2px;font-size:8px;width:90px;border:1px solid #1e40af;">Residenza</th>';
+        htmlOperativi+='<th style="background:#3b82f6;color:white;padding:2px;font-size:8px;width:75px;border:1px solid #1e40af;">Cell.Lav</th>';
+        htmlOperativi+='<th style="background:#3b82f6;color:white;padding:2px;font-size:8px;width:75px;border:1px solid #1e40af;">Cell.Priv</th>';
+        htmlOperativi+='</tr></thead><tbody>';
         
         for(let gruppo=1;gruppo<=4;gruppo++){
             const righeGruppo=datiMSP.operativi.filter(n=>n.gruppo===gruppo);
             righeGruppo.slice(0,6).forEach((riga,idx)=>{
-                const cidStr = String(riga.cid || '').trim().padStart(8, '0');
-                const dip = (cidStr !== '00000000' && cidStr !== '') ? dipendenti.find(d => d.cid === cidStr) : null;
-                // ✅ NO evidenziazione giallo per gli Operativi
-                const cellStyle=`padding:3px;border:1px solid #cbd5e1;`;
-                const sqStyle=`background:#dbeafe;font-weight:800;text-align:center;font-size:12px;color:#1e40af;width:35px;padding:3px;border:1px solid #cbd5e1;-webkit-print-color-adjust:exact;print-color-adjust:exact;`;
-                htmlOperativi+=`<tr>${idx===0?`<td style="${sqStyle}" rowspan="6">${gruppo}</td>`:''}<td style="${cellStyle}">${dip?`${dip.cognome} ${dip.nome}`:''}</td><td style="${cellStyle}">${dip?dip.sedeLavoro:''}</td><td style="${cellStyle}">${dip?dip.residenza:''}</td><td style="${cellStyle}">${dip?dip.cellLavoro:''}</td><td style="${cellStyle}">${dip?dip.cellPrivato:''}</td></tr>`;
+                const cidStr=String(riga.cid||'').trim().padStart(8,'0');
+                const dip=(cidStr!=='00000000'&&cidStr!=='')?dipendenti.find(d=>d.cid===cidStr):null;
+                // ✅ NO evidenziazione giallo per Operativi
+                const cellStyle=`padding:1px 2px;border:1px solid #cbd5e1;font-size:9px;`;
+                const sqStyle=`background:#dbeafe;font-weight:800;text-align:center;font-size:10px;color:#1e40af;padding:1px;border:1px solid #cbd5e1;-webkit-print-color-adjust:exact;print-color-adjust:exact;`;
+                htmlOperativi+=`<tr>${idx===0?`<td style="${sqStyle}" rowspan="6">${gruppo}</td>`:''}<td style="${cellStyle}">${dip?`${dip.cognome} ${dip.nome}`:''}</td><td style="${cellStyle};text-align:center;">${dip?dip.sedeLavoro:''}</td><td style="${cellStyle}">${dip?dip.residenza:''}</td><td style="${cellStyle};font-size:8px;">${dip?dip.cellLavoro:''}</td><td style="${cellStyle};font-size:8px;">${dip?dip.cellPrivato:''}</td></tr>`;
             });
-            if(gruppo<4)htmlOperativi+='<tr style="height:5px;background:transparent;"><td colspan="6" style="padding:0;border:none;"></td></tr>';
+            if(gruppo<4)htmlOperativi+='<tr style="height:2px;"><td colspan="6" style="padding:0;border:none;"></td></tr>';
         }
         htmlOperativi+='</tbody>';
         tabOperativi.innerHTML=htmlOperativi;
-        pagina2.appendChild(tabOperativi);
+        wrapper.appendChild(tabOperativi);
+        
+        pagina2.appendChild(wrapper);
     }else{
         const p=document.createElement('p');
         p.style.cssText='text-align:center;color:#64748b;font-style:italic;';

@@ -237,7 +237,9 @@ async function pollingDati() {
             attivitaCalendario = data.team_attivita_db || [];
             consuntivazioneData = data.team_consuntivazione_db || [];
             festivitaCustom = data.team_festivita_db || [];
-            schemaNominativiRaw = data.team_schema_nominativi_db || {};
+            // ✅ FIX: schemaNominativi ora è un oggetto {EEMM2: {tecnici:[...], operativi:[...]}}
+            const schemaRaw = data.team_schema_nominativi_db || {};
+            schemaNominativiRaw = schemaRaw;
             MATRICE_REPERIBILITA = data.team_matrice_reperibilita_db || {};
             
             window.odmDatabase = {};
@@ -1004,14 +1006,16 @@ function renderTabellaOperativi(){
         if(gruppo<4){const trSpacer=document.createElement('tr');trSpacer.className='riga-separatore';trSpacer.innerHTML='<td colspan="6"></td>';tbody.appendChild(trSpacer);}
     }
 }
-function selezionaRisorsaSchema(tipo,indice,cid){
-    if(!mspCorrenteSchema)return;
-    const datiMSP=garantisciStrutturaMSP(mspCorrenteSchema);
-    const cidNorm = cid ? String(cid).trim().padStart(8, '0') : '';
-    if(tipo==='tecnico'){ datiMSP.tecnici[indice].cid = cidNorm; }
-    else{ datiMSP.operativi[indice].cid = cidNorm; }
-    saveDataToSheets('team_schema_nominativi_db', schemaNominativi);
-    aggiornaSchemaNominativi();
+function selezionaRisorsaSchema(tipo, indice, cid) {
+  if (!mspCorrenteSchema) return;
+  const datiMSP = garantisciStrutturaMSP(mspCorrenteSchema);
+  if (tipo === 'tecnico') {
+    datiMSP.tecnici[indice].cid = cid;
+  } else {
+    datiMSP.operativi[indice].cid = cid;
+  }
+  saveDataToSheets('team_schema_nominativi_db', schemaNominativi);
+  aggiornaSchemaNominativi();
 }
 function esportaSchemaNominativiExcel(){const wb=XLSX.utils.book_new();Object.keys(schemaNominativi).sort().forEach(msp=>{const datiMSP=schemaNominativi[msp];if(!datiMSP)return;const datiTecnici=[["SQ.","CID","Cognome Nome","MSP","Sede","Residenza","Cell. Lavoro","Cell. Privato"]];datiMSP.tecnici.forEach(riga=>{const dip=(riga.cid&&riga.cid.trim()!=='')?dipendenti.find(d=>d.cid===riga.cid):null;datiTecnici.push([riga.gruppo,riga.cid||'',dip?`${dip.cognome} ${dip.nome}`:'',msp,dip?dip.sedeLavoro:'',dip?dip.residenza:'',dip?dip.cellLavoro:'',dip?dip.cellPrivato:'']);});XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiTecnici),`Tecnici_${msp}`);const datiOperativi=[["SQ.","CID","Cognome Nome","MSP","Sede","Residenza","Cell. Lavoro","Cell. Privato"]];datiMSP.operativi.forEach(riga=>{const dip=(riga.cid&&riga.cid.trim()!=='')?dipendenti.find(d=>d.cid===riga.cid):null;datiOperativi.push([riga.gruppo,riga.cid||'',dip?`${dip.cognome} ${dip.nome}`:'',msp,dip?dip.sedeLavoro:'',dip?dip.residenza:'',dip?dip.cellLavoro:'',dip?dip.cellPrivato:'']);});XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(datiOperativi),`Operativi_${msp}`);});XLSX.writeFile(wb,`Schema_Nominativi_TuttiMSP.xlsx`);}
 function importaSchemaNominativiExcel(e){const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=function(evt){try{const data=new Uint8Array(evt.target.result);const wb=XLSX.read(data,{type:'array'});const fogliTecnici=Object.keys(wb.Sheets).filter(k=>k.startsWith('Tecnici_'));const fogliOperativi=Object.keys(wb.Sheets).filter(k=>k.startsWith('Operativi_'));const tuttiMSP=new Set();fogliTecnici.forEach(k=>tuttiMSP.add(k.replace('Tecnici_','')));fogliOperativi.forEach(k=>tuttiMSP.add(k.replace('Operativi_','')));if(tuttiMSP.size===0){if(wb.Sheets["Tecnici"]){const jsonTecnici=XLSX.utils.sheet_to_json(wb.Sheets["Tecnici"],{header:1}).slice(1);const datiMSP=garantisciStrutturaMSP(mspCorrenteSchema);datiMSP.tecnici=jsonTecnici.map(r=>({gruppo:parseInt(r[0])||1,cid:(r[1]&&String(r[1]).trim()!=='')?formattaCID(String(r[1])):''}));}if(wb.Sheets["Operativi"]){const jsonOperativi=XLSX.utils.sheet_to_json(wb.Sheets["Operativi"],{header:1}).slice(1);const datiMSP=garantisciStrutturaMSP(mspCorrenteSchema);datiMSP.operativi=jsonOperativi.map(r=>({gruppo:parseInt(r[0])||1,cid:(r[1]&&String(r[1]).trim()!=='')?formattaCID(String(r[1])):''}));}}else{tuttiMSP.forEach(msp=>{const datiMSP=garantisciStrutturaMSP(msp);if(wb.Sheets[`Tecnici_${msp}`]){const jsonTecnici=XLSX.utils.sheet_to_json(wb.Sheets[`Tecnici_${msp}`],{header:1}).slice(1);datiMSP.tecnici=jsonTecnici.map(r=>({gruppo:parseInt(r[0])||1,cid:(r[1]&&String(r[1]).trim()!=='')?formattaCID(String(r[1])):''}));}if(wb.Sheets[`Operativi_${msp}`]){const jsonOperativi=XLSX.utils.sheet_to_json(wb.Sheets[`Operativi_${msp}`],{header:1}).slice(1);datiMSP.operativi=jsonOperativi.map(r=>({gruppo:parseInt(r[0])||1,cid:(r[1]&&String(r[1]).trim()!=='')?formattaCID(String(r[1])):''}));}});}saveDataToSheets('team_schema_nominativi_db', schemaNominativi);popolaFiltroMSPSchemaNominativi();aggiornaSchemaNominativi();alert("Schema nominativi importato con successo!");}catch(err){alert("Errore lettura Excel: "+err.message);}};reader.readAsArrayBuffer(file);e.target.value='';}
